@@ -31,6 +31,7 @@ sound.  Copyright (C) 1994, 2026 Michael Allen Wilmes.
 | `mml.py` | the tune language: parser, `Tune`, `Note`, the instrument / pattern / effect / scale / sample library |
 | `synth.py`, `synthfx.py` | the voices, envelopes, effects, filter; the shared echo and reverb bus |
 | `dpcm.py` | WAV to NES-style delta samples, the `.dpcm` file format (`python -m chipsynth.dpcm demo|convert`) |
+| `song.py`, `songmml.py` | the `Song` model (clips, repeats, calls kept as objects), `Song.compile()` to a `Tune`, MML import / export: `Song.from_mml(text)`, `song.to_mml()` |
 | `player.py` | `TunePlayer`: schedules a `Tune` on the synth, loops, tails ring over the restart |
 | `output.py` | `MusicOut`: live playback through pygame (the only place pygame is used) |
 | `musicgen.py` | a seeded tune generator (`generate(kind, seed, mood, tempo)` returns MML text) |

@@ -44,6 +44,7 @@ BUILTIN_INSTR = {
 }
 VOICE_LABEL = re.compile(r"^\s*([vVpP][1-4]|[dD][12])\s*:(.*)$")
 SECTION = re.compile(r"^\s*\[([A-Za-z]+)\]\s*$")
+WORDS = re.compile(r"(loop|once|wave|pw|adsr|pan|nmode|instr|vib|slide|arprate|arp|pws|fx|filter|fsweep|send)(?![A-Za-z])", re.I)
 SECTIONS = ("instr", "pat", "fx", "sample", "key")
 SKIPPED_SECTIONS = ()
 SCALES = {                         # semitones above the tonic
@@ -687,7 +688,7 @@ class _Parser:
                     err("a number needs a note before it (c8) or a letter after it (5c)")
             elif re.match(r"key(?![A-Za-z])", text[i:], re.I):
                 i = self.set_key(v, text, i, line, col0)
-            elif re.match(r"(loop|once|wave|pw|adsr|pan|nmode|instr|vib|slide|arprate|arp|pws|fx|filter|fsweep|send)(?![A-Za-z])", text[i:], re.I):
+            elif WORDS.match(text[i:]):
                 word = re.match(r"[A-Za-z]+", text[i:]).group(0).lower()
                 j = i + len(word)
                 if word == "loop":

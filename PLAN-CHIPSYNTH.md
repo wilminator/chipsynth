@@ -163,7 +163,19 @@ pkgs.player("forest:dawn", loop=True)    # TunePlayer ready for MusicOut
 Part A steps 1-5 done on branch `chipsynth-split` (2026-10-13): the move with same-module stand-ins in `blobs/`, the
 boundary test, the engine tests moved to `chipsynth/tests`, and every import in `blobs/` and `tests/` now names
 `chipsynth` directly. The stand-ins (`blobs/synth.py` etc., also usable as `python -m blobs.synth`) are unused by the
-repo and kept for your own scripts; they move to `legacy/` when you say. chipsynth/README.md has the quick start. Next: composer C0. Git history now holds the old layout, so `legacy/music_before_split.py` is not needed.
+repo and kept for your own scripts; they move to `legacy/` when you say. chipsynth/README.md has the quick start. Git history now holds the old layout, so `legacy/music_before_split.py` is not needed.
+
+**C0 done** (2026-10-13): `chipsynth/song.py` (the `Song` model: clips, repeats, calls, comments and every MML token as
+an event; `Song.compile(lib)` plays the events through the parser's own voice state, so it gives exactly the `Tune`
+that parsing the MML gives) and `chipsynth/songmml.py` (`Song.from_mml`, `song.to_mml`). `chipsynth/tests/test_song.py`
+checks `parse == from_mml().compile()`, that the exported text compiles to the same tune, and that export is a fixpoint,
+on the demo songs, generator output (every kind, mood, 3 seeds), a file using every feature, and every MML string in
+the test suites. Decisions: the model is notation-level (a clip is relative to the caller's octave, like `[pat]`);
+a pattern is note-kind or DAC-kind, not both; an uncalled pattern that does not read is kept as raw text; library
+patterns are copied into the song when used, library instruments / fx / scales stay references until the package
+step embeds them (C0b); lengths are tick counts written back as the fewest tokens (`4&16`); import drops inline
+`//` comments and keeps own-line ones. Limits: a tie into a scale degree and lengths of 1, 2, 3, 5, 7, 11 ticks have no
+MML spelling (`SongError`). Next: C0b.
 
 ## Order of work
 1. Part A steps 1-3 (move, boundary test, move tests), one zip.
