@@ -160,10 +160,10 @@ pkgs.player("forest:dawn", loop=True)    # TunePlayer ready for MusicOut
 ---------------------------------------------------------------------------------------------------------------------
 
 ## Status
-Part A steps 1-4 done on branch `chipsynth-split` (2026-10-13): the move with same-module stand-ins in `blobs/`, the
+Part A steps 1-5 done on branch `chipsynth-split` (2026-10-13): the move with same-module stand-ins in `blobs/`, the
 boundary test, the engine tests moved to `chipsynth/tests`, and every import in `blobs/` and `tests/` now names
 `chipsynth` directly. The stand-ins (`blobs/synth.py` etc., also usable as `python -m blobs.synth`) are unused by the
-repo and kept for your own scripts; they move to `legacy/` when you say. Next: the quick-start README, then composer C0. Git history now holds the old layout, so `legacy/music_before_split.py` is not needed.
+repo and kept for your own scripts; they move to `legacy/` when you say. chipsynth/README.md has the quick start. Next: composer C0. Git history now holds the old layout, so `legacy/music_before_split.py` is not needed.
 
 ## Order of work
 1. Part A steps 1-3 (move, boundary test, move tests), one zip.
