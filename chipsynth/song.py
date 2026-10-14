@@ -208,6 +208,7 @@ class Piece:
     state: tuple                  # (octave, boundary, key) of the voice just before the event
     pitch: int = None
     note: object = None           # the compiled mml.Note this piece belongs to
+    stack: tuple = ()             # the calls and repeats this occurrence is inside: ((container, event), ...), outermost first
 
 
 @dataclass
@@ -276,6 +277,7 @@ class _Compiler:
         self.trace = trace
         self.cur = None
         self.lane = 0
+        self.stack = []
         p = self.p = mml._Parser("", lib)
         t = p.tune
         t.title, t.author, t.comment = song.title, song.author, song.comment
@@ -310,7 +312,7 @@ class _Compiler:
 
     def note_piece(self, v, kind, e, start, dur, state, pitch=None):
         if self.trace is not None:
-            self.trace.pieces[self.lane].append(Piece(self.lane, start, dur, kind, e, self.cur, state, pitch, v.last))
+            self.trace.pieces[self.lane].append(Piece(self.lane, start, dur, kind, e, self.cur, state, pitch, v.last, tuple(self.stack)))
 
     # ---- notes
     def do_Note(self, v, e, depth):
@@ -380,6 +382,7 @@ class _Compiler:
         if not 30 <= e.bpm <= 300:
             self.err("tempo is 30 to 300")
         self.p.tempo[v.pos] = e.bpm
+        self.note_piece(v, "tempo", e, v.pos, 0, (v.octave, v.boundary, v.key))
 
     def do_Select(self, v, e, depth):
         self.p.select(v, e.name, 0, 0)
@@ -405,6 +408,7 @@ class _Compiler:
     def do_Loop(self, v, e, depth):
         if self.p.loop is None:
             self.p.loop = v.pos
+        self.note_piece(v, "loop", e, v.pos, 0, (v.octave, v.boundary, v.key))
 
     def do_Once(self, v, e, depth):
         self.p.tune.once = True
@@ -416,8 +420,10 @@ class _Compiler:
     def do_Repeat(self, v, e, depth):
         if not 1 <= e.count <= 99:
             self.err("a repeat count is 1 to 99")
+        self.stack.append((self.cur, e))
         for _ in range(e.count):
             self.play(v, e.items, depth + 1)
+        self.stack.pop()
 
     def do_Call(self, v, e, depth):
         clip = self.song.clips.get(e.name)
@@ -427,7 +433,9 @@ class _Compiler:
             self.err("pattern '%s' could not be read" % e.name)
         if depth > 8:
             self.err("patterns call each other too deeply")
+        self.stack.append((self.cur, e))
         self.play(v, clip.items, depth + 1)
+        self.stack.pop()
 
     # ---- DAC
     def do_Play(self, v, e, depth):

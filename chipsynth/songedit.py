@@ -19,7 +19,7 @@ import re
 
 from . import mml
 from .mml import MMLError, LETTER
-from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Trace, TRACKS, SongError)
+from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Tempo, Loop, Trace, TRACKS, SongError)
 from .synth import WAVES, Instrument
 from .songmml import length_pieces
 
@@ -324,6 +324,205 @@ class Editor:
         else:
             self._track(voice).insert(0, Select(name))
         return name
+
+    # ---- song settings, tempo map, loop point
+    def set_song(self, **fields):
+        """title, author, comment, bpm (30-300), time ((n, d)), detune (cents), once, echo ((secs, fb, mix, wide) or
+        None) and reverb (0-15)."""
+        def run():
+            for k, v in fields.items():
+                if k in ("title", "author", "comment"):
+                    if not isinstance(v, str) or "\n" in v:
+                        raise EditError("%s is one line of text" % k)
+                elif k == "bpm":
+                    if not 30 <= v <= 300:
+                        raise EditError("tempo is 30 to 300")
+                elif k == "time":
+                    n, d = v
+                    if not (1 <= n <= 32 and d in (1, 2, 4, 8, 16, 32)):
+                        raise EditError("time must look like 4/4 or 6/8")
+                    v = (int(n), int(d))
+                elif k == "detune":
+                    if not -1200 <= v <= 1200:
+                        raise EditError("tuning is -1200 to 1200 cents")
+                elif k == "once":
+                    v = bool(v)
+                elif k == "reverb":
+                    if not 0 <= v <= 15:
+                        raise EditError("reverb is 0 to 15")
+                elif k == "echo":
+                    if v is not None:
+                        secs, fb, mix, wide = round(v[0], 3), round(v[1], 2), round(v[2], 2), v[3]
+                        if not (0.02 <= secs <= 1.0 and 0 <= fb <= 0.9 and 0 <= mix <= 1.0):
+                            raise EditError("echo is 20-1000 ms, feedback 0-90 %, mix 0-100 %")
+                        v = (secs, fb, mix, bool(wide))
+                else:
+                    raise EditError("unknown song setting '%s'" % k)
+                setattr(self.song, k, v)
+        return self.change("song settings", run)
+
+    def tempo_marks(self):
+        """[(tick, bpm)] of the tempo changes in the song (the starting tempo is song.bpm)."""
+        seen = {}
+        for lane in range(6):
+            for p in self.trace.pieces[lane]:
+                if p.kind == "tempo":
+                    seen.setdefault(p.start, p.event.bpm)
+        return sorted(seen.items())
+
+    def loop_at(self):
+        """The tick of the loop marker the compiler used, or None."""
+        for lane in range(6):
+            for p in self.trace.pieces[lane]:
+                if p.kind == "loop":
+                    return p.start
+        return None
+
+    def set_tempo_at(self, tick, bpm):
+        if not 30 <= bpm <= 300:
+            raise EditError("tempo is 30 to 300")
+        def run():
+            if tick <= 0:
+                self.song.bpm = bpm
+                return
+            for lane in range(6):
+                for p in self.trace.pieces[lane]:
+                    if p.kind == "tempo" and p.start == tick:
+                        p.event.bpm = bpm
+                        return
+            self._insert_at(0, tick, Tempo(bpm))
+        return self.change("tempo", run)
+
+    def remove_tempo(self, tick):
+        def run():
+            hit = False
+            for lane in range(6):
+                for p in list(self.trace.pieces[lane]):
+                    if p.kind == "tempo" and p.start == tick and p.event in p.container:
+                        p.container.remove(p.event)
+                        hit = True
+            if not hit:
+                raise EditError("no tempo change there")
+        return self.change("remove tempo", run)
+
+    def set_loop(self, tick):
+        """Loop from `tick` (the start of a bar; the tune moves it back to one otherwise).  None removes the loop."""
+        def run():
+            self._remove_events(Loop)
+            if tick:
+                self.refresh()
+                self._insert_at(0, tick, Loop())
+        return self.change("loop point", run)
+
+    def _remove_events(self, cls):
+        def strip(items):
+            items[:] = [e for e in items if not isinstance(e, cls)]
+            for e in items:
+                if isinstance(e, Repeat):
+                    strip(e.items)
+        for items in self.song.tracks.values():
+            strip(items)
+        for clip in self.song.clips.values():
+            if clip.raw is None:
+                strip(clip.items)
+
+    def _insert_at(self, lane, tick, event):
+        """Put a zero-length event (tempo, loop marker) at `tick` of a voice's own list, splitting a rest if needed."""
+        top = self._track(lane)
+        if tick >= self.trace.ends[lane]:
+            gap = tick - self.trace.ends[lane]
+            self._check(gap)
+            top.extend(self._rests(gap, None) + [event])
+            return
+        for p in self.trace.pieces[lane]:
+            if p.container is top and p.dur > 0 and p.start == tick:
+                top.insert(_index(top, p.event), event)
+                return
+        firsts = {}
+        for p in self.trace.pieces[lane]:
+            if p.stack and p.stack[0][0] is top and p.dur > 0:
+                ev = p.stack[0][1]
+                firsts[id(ev)] = (min(p.start, firsts.get(id(ev), (p.start, ev))[0]), ev)
+        for start, ev in firsts.values():
+            if start == tick:                        # between a pattern call / repeat and what came before it
+                top.insert(_index(top, ev), event)
+                return
+        for p in self.trace.pieces[lane]:
+            if p.container is top and p.kind == "rest" and p.start < tick < p.start + p.dur:
+                a, b = tick - p.start, p.start + p.dur - tick
+                self._check(a, b)
+                self._replace(top, p.event, [Rest(a), event, Rest(b)])
+                return
+        raise EditError("that spot is inside a note or a pattern: put the marker between notes (or use Make unique first)")
+
+    # ---- patterns (clips)
+    def clip_uses(self):
+        """{clip name: number of places that call it}."""
+        uses = {name: 0 for name in self.song.clips}
+        def scan(items):
+            for e in items:
+                if isinstance(e, Call) and e.name in uses:
+                    uses[e.name] += 1
+                elif isinstance(e, Repeat):
+                    scan(e.items)
+        for items in self.song.tracks.values():
+            scan(items)
+        for clip in self.song.clips.values():
+            if clip.raw is None:
+                scan(clip.items)
+        return uses
+
+    def delete_clip(self, name):
+        def run():
+            if self.clip_uses().get(name, 1):
+                raise EditError("pattern '%s' is still used" % name)
+            del self.song.clips[name]
+        return self.change("delete pattern", run)
+
+    def rename_clip(self, old, new):
+        def run():
+            if not NAME.match(new or ""):
+                raise EditError("a pattern name is letters, digits, - and _")
+            if old not in self.song.clips or new in self.song.clips:
+                raise EditError("there is already a pattern called '%s'" % new if new in self.song.clips else "no pattern '%s'" % old)
+            clip = self.song.clips.pop(old)
+            clip.name = new
+            self.song.clips[new] = clip
+            def fix(items):
+                for e in items:
+                    if isinstance(e, Call) and e.name == old:
+                        e.name = new
+                    elif isinstance(e, Repeat):
+                        fix(e.items)
+            for items in self.song.tracks.values():
+                fix(items)
+            for c in self.song.clips.values():
+                if c.raw is None:
+                    fix(c.items)
+        return self.change("rename pattern", run)
+
+    def inside(self, voice, index):
+        """What the note is part of, innermost first: a list of ('pattern', name) / ('repeat', count)."""
+        out = []
+        for container, ev in reversed(self.group(voice, index)[0].stack):
+            out.append(("pattern", ev.name) if isinstance(ev, Call) else ("repeat", ev.count))
+        return out
+
+    def make_unique(self, voice, index):
+        """Replace the pattern call (or repeat) this note is inside with its own copy of the events, so editing the
+        note changes only this place."""
+        def run():
+            stack = self.group(voice, index)[0].stack
+            if not stack:
+                raise EditError("this note is not in a pattern or a repeat")
+            container, ev = stack[-1]
+            if isinstance(ev, Call):
+                clip = self.song.clips.get(ev.name)
+                new = copy.deepcopy(clip.items)
+            else:
+                new = [copy.deepcopy(x) for _ in range(ev.count) for x in ev.items]
+            self._replace(container, ev, new)
+        return self.change("make unique", run)
 
     # ---- drum / sample lanes (D1 = lane 4, D2 = lane 5)
     SAMPLE_NAME = re.compile(r"[A-Za-z_]+$")

@@ -260,6 +260,96 @@ class DacTests(unittest.TestCase):
         self.assertEqual(hits(ed), [0, 192])
 
 
+class SettingsTests(unittest.TestCase):
+    TEXT = "[pat]\nriff = c4 d4 e4 r4\nV1: o4 !riff !riff\nV2: o3 c1 c1\n"
+
+    def test_song_settings_round_trip(self):
+        ed = make(self.TEXT)
+        ed.set_song(title="Hi", author="Me", bpm=100, time=(3, 4), detune=50, once=True,
+                    echo=(0.24, 0.4, 0.3, True), reverb=4)
+        t = Song.from_mml(ed.song.to_mml()).compile()
+        self.assertEqual((t.title, t.author, t.bpm, t.time, t.detune, t.once, t.reverb),
+                         ("Hi", "Me", 100, (3, 4), 50, True, 4))
+        self.assertEqual(t.echo, (0.24, 0.4, 0.3, True))
+        ed.set_song(echo=None)
+        self.assertIsNone(ed.tune.echo)
+
+    def test_bad_settings_refused(self):
+        ed = make(self.TEXT)
+        for bad in ({"bpm": 400}, {"time": (4, 3)}, {"reverb": 99}, {"echo": (5.0, 0, 0, False)},
+                    {"title": "two\nlines"}, {"nope": 1}):
+            with self.assertRaises(EditError):
+                ed.set_song(**bad)
+        self.assertFalse(ed.can_undo())
+
+    def test_tempo_changes_and_loop_point(self):
+        ed = make(self.TEXT)
+        ed.make_unique(0, 5)                               # the second riff becomes plain notes
+        ed.set_tempo_at(384, 150)
+        self.assertEqual(ed.tempo_marks(), [(384, 150)])
+        ed.set_tempo_at(384, 160)
+        self.assertEqual(ed.tune.tempo_events, [(384, 160)])
+        ed.set_tempo_at(0, 90)
+        self.assertEqual(ed.tune.bpm, 90)
+        ed.set_loop(384)
+        self.assertEqual(ed.tune.loop_tick, 384)
+        self.assertEqual(ed.loop_at(), 384)
+        ed.set_loop(768)
+        self.assertEqual(ed.tune.loop_tick, 768)
+        ed.set_loop(None)
+        self.assertEqual(ed.tune.loop_tick, 0)
+        ed.remove_tempo(384)
+        self.assertEqual(ed.tempo_marks(), [])
+        with self.assertRaises(EditError):
+            ed.remove_tempo(384)
+
+    def test_marker_inside_a_note_or_pattern_is_refused(self):
+        ed = make(self.TEXT)
+        with self.assertRaises(EditError):
+            ed.set_tempo_at(192, 150)                      # inside the first !riff
+        ed2 = make("V1: o4 c2 d2\n")
+        with self.assertRaises(EditError):
+            ed2.set_tempo_at(48, 150)                      # inside a note
+        ed2.set_tempo_at(192, 150)                         # between notes is fine
+        self.assertEqual(ed2.tempo_marks(), [(192, 150)])
+
+    def test_marker_in_a_rest_splits_it_and_past_the_end_adds_one(self):
+        ed = make("V1: o4 c4 r2 d4\n")
+        ed.set_tempo_at(192, 140)
+        self.assertEqual([(n.start, n.dur) for n in ed.tune.voices[0]], [(0, 96), (288, 96)])
+        ed.set_tempo_at(960, 120)
+        self.assertEqual(ed.tempo_marks(), [(192, 140), (960, 120)])
+        self.assertEqual(Song.from_mml(ed.song.to_mml()).compile().tempo_events, [(192, 140), (960, 120)])
+
+    def test_patterns_listed_renamed_deleted_and_made_unique(self):
+        ed = make(self.TEXT)
+        self.assertEqual(ed.clip_uses(), {"riff": 2})
+        self.assertEqual(ed.inside(0, 0), [("pattern", "riff")])
+        ed.rename_clip("riff", "tune")
+        self.assertEqual(ed.clip_uses(), {"tune": 2})
+        with self.assertRaises(EditError):
+            ed.delete_clip("tune")
+        ed.make_unique(0, 0)
+        ed.make_unique(0, 3)
+        self.assertEqual(ed.clip_uses(), {"tune": 0})
+        before = notes(ed)
+        ed.delete_clip("tune")
+        self.assertEqual(notes(ed), before)
+        self.assertEqual(ed.inside(0, 0), [])
+        with self.assertRaises(EditError):
+            ed.make_unique(0, 0)
+        ed.set_pitch(0, 0, 60)                              # now only this note changes
+        self.assertEqual(notes(ed)[0][2], 60)
+        self.assertEqual(notes(ed)[3][2], 48)
+
+    def test_make_unique_on_a_repeat(self):
+        ed = Editor(Song.from_mml("V1: o4 [c4 d4]2 e4\n"))
+        self.assertEqual(ed.inside(0, 0), [("repeat", 2)])
+        ed.make_unique(0, 0)
+        self.assertEqual(ed.inside(0, 0), [])
+        self.assertEqual([p for _, _, p in notes(ed)], [48, 50, 48, 50, 52])
+
+
 class FuzzTests(unittest.TestCase):
     def run_fuzz(self, text, seed, steps=40):
         rnd = random.Random(seed)
