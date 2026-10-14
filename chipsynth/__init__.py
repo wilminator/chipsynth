@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 """chipsynth: a small chip-style synthesizer, a tune language (MML) and a player.
 
     from chipsynth import parse, TunePlayer, render_wav

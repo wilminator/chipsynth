@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 """The Song model: MML -> Song -> Tune and Song -> MML round trips (PLAN-CHIPSYNTH.md, C0)."""
 import ast
 import dataclasses

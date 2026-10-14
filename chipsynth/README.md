@@ -2,7 +2,7 @@
 
 A small chip-style synthesizer, a tune language (MML) and a player, in Python.  Four voices (pulse, saw, triangle,
 sine, noise) plus two DAC sample channels, rendered to stereo at 44.1 kHz.  Needs numpy and scipy; pygame only for live
-sound.  Copyright (C) 1994, 2026 Michael Allen Wilmes.
+sound.  Copyright (C) 2026 Michael Allen Wilmes.
 
 ## Quick start
 

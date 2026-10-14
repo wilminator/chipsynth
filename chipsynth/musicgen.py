@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 """The song generator (see DESIGN-MUSIC.md): a context kind, a seed and an optional mood become a
 finished tune in MML text, so a generated song is an ordinary tune file the maker can save and edit.
 

@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 """chipsynth must stay a library: it never imports the game (blobs), and pygame only inside output.py, lazily."""
 import ast
 import sys

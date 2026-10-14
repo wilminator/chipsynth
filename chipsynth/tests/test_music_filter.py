@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 import unittest
 
 import numpy as np

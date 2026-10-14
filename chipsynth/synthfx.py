@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 """The shared effect bus of the chiptune mixer: an echo and a reverb (see DESIGN-MUSIC.md).
 
 Every voice has a `send` level; the sends of all voices are summed (stereo, already panned) and run through the

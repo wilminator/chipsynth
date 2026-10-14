@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 """The Song model: what the composer edits and the package format stores (PLAN-CHIPSYNTH.md, Part B).
 
 MML is only an import / export format (`chipsynth.songmml`).  A `Song` keeps the structure a person wrote:

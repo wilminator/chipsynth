@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 """The tune language (see DESIGN-MUSIC.md): text MML -> a `Tune` of notes per voice.
 
 This is the core subset: header (title, author, comment, tempo, time, tune, once), [instr] and [pat]

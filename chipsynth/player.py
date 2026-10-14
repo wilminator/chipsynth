@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 """Plays a Tune (see mml.py) through the mixer core (synth.py).  Needs no audio device: it renders samples.
 
     p = TunePlayer(tune)            # loops from the loop marker; tune.once plays a single time

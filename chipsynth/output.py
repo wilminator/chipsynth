@@ -1,4 +1,4 @@
-# Copyright (C) 1994, 2026 Michael Allen Wilmes
+# Copyright (C) 2026 Michael Allen Wilmes
 """Live playback: MusicOut puts a TunePlayer on a pygame mixer channel from a small background thread (the maker's
 preview; the game uses it too).  Without pygame or an audio device it says so and stays silent.  pygame is imported
 only when a mixer is opened, so the rest of chipsynth never needs it.
