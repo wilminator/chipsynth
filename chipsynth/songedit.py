@@ -214,6 +214,96 @@ class Editor:
     def move(self, voice, index, start, pitch):
         return self.change("move note", lambda: self._move(voice, index, start, pitch))
 
+    # ---- several notes at once (a selection is [(voice, start)], so it survives the notes being renumbered)
+    def selection_notes(self, selection):
+        """[(voice, start, dur, pitch)] of the selected notes that exist, in order."""
+        out = []
+        for v, start in sorted(selection):
+            i = self.find(v, start)
+            if i is not None:
+                n = self.tune.voices[v][i]
+                out.append((v, n.start, n.dur, n.pitch))
+        return out
+
+    def _erase_at(self, voice, start):
+        i = self.find(voice, start)
+        if i is None:
+            raise EditError("a selected note is gone")
+        self._erase(voice, i)
+
+    def _clear(self, voice, t0, t1, keep=()):
+        """Make room: remove what sounds in [t0, t1) of a voice.  A note that began earlier is cut at t0; one that runs
+        past t1 keeps its tail."""
+        for n in [n for n in self.tune.voices[voice] if n.start < t1 and n.start + n.dur > t0
+                  and (voice, n.start) not in keep]:
+            start, dur, pitch = n.start, n.dur, n.pitch
+            self._erase_at(voice, start)
+            if start < t0:
+                self._add(voice, start, t0 - start, pitch)
+            if start + dur > t1:
+                self._add(voice, t1, start + dur - t1, pitch)
+
+    def move_notes(self, selection, dtick=0, dpitch=0):
+        """Move the selected notes together.  All or nothing.  Returns the new selection."""
+        def run():
+            notes = self.selection_notes(selection)
+            if not notes:
+                raise EditError("nothing selected")
+            for v, start, dur, pitch in notes:
+                if start + dtick < 0 or not 0 <= pitch + dpitch <= MAX_PITCH:
+                    raise EditError("that would move a note out of range")
+            for v, start, dur, pitch in notes:
+                self._erase_at(v, start)
+            for v, start, dur, pitch in notes:
+                self._clear(v, start + dtick, start + dtick + dur)
+                self._add(v, start + dtick, dur, pitch + dpitch)
+            return [(v, start + dtick) for v, start, dur, pitch in notes]
+        return self.change("move notes", run)
+
+    def erase_notes(self, selection):
+        def run():
+            notes = self.selection_notes(selection)
+            if not notes:
+                raise EditError("nothing selected")
+            for v, start, dur, pitch in notes:
+                self._erase_at(v, start)
+        return self.change("erase notes", run)
+
+    def quantize(self, selection, grid):
+        """Snap the starts (and lengths) of the selected notes to `grid` ticks.  Returns the new selection."""
+        def run():
+            notes = self.selection_notes(selection)
+            if not notes:
+                raise EditError("nothing selected")
+            todo = [(v, max(0, int(round(start / grid)) * grid), max(grid, int(round(dur / grid)) * grid), pitch, start)
+                    for v, start, dur, pitch in notes]
+            for v, ns, nd, pitch, old in todo:
+                self._erase_at(v, old)
+            for v, ns, nd, pitch, old in todo:
+                self._clear(v, ns, ns + nd)
+                self._add(v, ns, nd, pitch)
+            return [(v, ns) for v, ns, nd, pitch, old in todo]
+        return self.change("quantize", run)
+
+    def paste_notes(self, clip, tick, voice_shift=0):
+        """`clip` is [(voice, start, dur, pitch)] (from selection_notes).  The first note lands on `tick`; whatever
+        was sounding underneath is replaced.  Returns the new selection."""
+        def run():
+            if not clip:
+                raise EditError("nothing to paste")
+            base = min(c[1] for c in clip)
+            out = []
+            for v, start, dur, pitch in clip:
+                v2 = v + voice_shift
+                if not 0 <= v2 <= 3:
+                    raise EditError("there is no such voice")
+                t = tick + start - base
+                self._clear(v2, t, t + dur)
+                self._add(v2, t, dur, pitch)
+                out.append((v2, t))
+            return out
+        return self.change("paste", run)
+
     def put_note(self, voice, tick, pitch, dur):
         """Tracker-style entry: sound `pitch` at `tick` for up to `dur` ticks.  A note that starts there changes
         pitch (keeping its length); a note running through `tick` is cut short there; the new note stops where the
@@ -615,7 +705,7 @@ class Editor:
             if run is None:
                 raise EditError("no room there")
             first = run[0]
-            a, b = start - first.start, run[-1].start + run[-1].dur - end
+            a, b = start - first.start, max(0, run[-1].start + run[-1].dur - end)
             self._check(a, b)
             c = first.container
             i = _index(c, first.event)
@@ -665,7 +755,7 @@ class Editor:
             if run is None:
                 raise EditError("no room there")
             first = run[0]
-            a, b = start - first.start, run[-1].start + run[-1].dur - end
+            a, b = start - first.start, max(0, run[-1].start + run[-1].dur - end)
             self._check(a, b)
             before, ev, after = spell(pitch, first.state)
             ev.dur = dur
@@ -692,7 +782,10 @@ class Editor:
                 if q.start != run[-1].start + run[-1].dur:
                     break
                 run.append(q)
-            if run[-1].start + run[-1].dur >= end:
+            last = run[-1]
+            at_end = (last.start + last.dur == self.trace.ends[voice] and c is self.song.tracks.get(TRACKS[voice])
+                      and c and c[-1] is last.event)
+            if last.start + last.dur >= end or at_end:      # a rest that ends the voice can be written over past its end
                 return run
         return None
 

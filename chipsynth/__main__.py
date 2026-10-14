@@ -5,12 +5,13 @@
   dump PKG.csp [-o FILE]          the package as text (stdout by default)
   build TEXT [-o PKG.csp]         assemble a package from a dump
   import PKG.csp FILE.mml ...     add songs (song id = file name) to a package, creating it if needed
-  export PKG.csp [-d DIR]         write every song as MML
+                                  (FILE.mid works too: the first four parts with notes)
+  export PKG.csp [-d DIR] [--midi]  write every song as MML (or as .mid files)
 """
 import sys
 from pathlib import Path
 
-from . import mml, package as pk, packagetext
+from . import mml, midi, package as pk, packagetext
 from .packageset import PackageSet
 from .song import Song
 
@@ -56,19 +57,30 @@ def main(argv):
             path = Path(args[0])
             pkg = pk.load(path) if path.exists() else pk.Package(name=path.stem)
             for f in args[1:]:
-                pkg.add_song(Path(f).stem, Song.from_mml(Path(f).read_text(encoding="utf-8")))
+                if Path(f).suffix.lower() in (".mid", ".midi"):
+                    song = midi.from_midi(Path(f).read_bytes())
+                else:
+                    song = Song.from_mml(Path(f).read_text(encoding="utf-8"))
+                pkg.add_song(Path(f).stem, song)
             pk.save(pkg, path)
             print("%s: %d song(s)" % (path, len(pkg.songs)))
         elif cmd == "export" and len(args) >= 1:
+            as_midi = "--midi" in args
+            args = [a for a in args if a != "--midi"]
             d = Path(opt(args, "-d") or ".")
             d.mkdir(parents=True, exist_ok=True)
-            for sid, song in pk.load(args[0]).songs.items():
-                (d / (sid + ".mml")).write_text(song.to_mml(), encoding="utf-8", newline="\n")
-                print("wrote", d / (sid + ".mml"))
+            pkg = pk.load(args[0])
+            for sid, song in pkg.songs.items():
+                if as_midi:
+                    (d / (sid + ".mid")).write_bytes(midi.to_midi(song.compile(pkg.library())))
+                    print("wrote", d / (sid + ".mid"))
+                else:
+                    (d / (sid + ".mml")).write_text(song.to_mml(), encoding="utf-8", newline="\n")
+                    print("wrote", d / (sid + ".mml"))
         else:
             print(__doc__)
             return 2
-    except (pk.PackageError, mml.MMLError, OSError) as e:
+    except (pk.PackageError, mml.MMLError, midi.MidiError, OSError) as e:
         print("error:", e, file=sys.stderr)
         return 1
     return 0

@@ -181,6 +181,70 @@ class PutNoteTests(unittest.TestCase):
         self.assertEqual(notes(ed)[-1], (480, 24, 60))
 
 
+class SelectionTests(unittest.TestCase):
+    def test_move_together_cuts_what_it_lands_on_and_is_one_undo(self):
+        ed = make("V1: o4 c4 d4 e4 f4 g4\nV2: o3 c1\n")
+        sel = ed.move_notes([(0, 0), (0, 96)], dtick=48)
+        self.assertEqual(sel, [(0, 48), (0, 144)])
+        self.assertEqual(notes(ed), [(48, 96, 48), (144, 96, 50), (240, 48, 52), (288, 96, 53), (384, 96, 55)])
+        self.assertEqual(ed.undo(), "move notes")
+        self.assertEqual([p for _, _, p in notes(ed)], [48, 50, 52, 53, 55])
+        self.assertFalse(ed.can_undo())
+
+    def test_transpose_together_and_limits(self):
+        ed = make("V1: o4 c4 d4\n")
+        ed.move_notes([(0, 0), (0, 96)], dpitch=12)
+        self.assertEqual([p for _, _, p in notes(ed)], [60, 62])
+        with self.assertRaises(EditError):
+            ed.move_notes([(0, 0)], dtick=-5)
+        with self.assertRaises(EditError):
+            ed.move_notes([(0, 0)], dpitch=100)
+        with self.assertRaises(EditError):
+            ed.move_notes([(0, 999)], dpitch=1)             # no such note
+        self.assertEqual([p for _, _, p in notes(ed)], [60, 62])
+
+    def test_copy_and_paste_replace_what_is_underneath(self):
+        ed = make("V1: o4 c4 d4 e4 f4 g4 a4\n")
+        clip = ed.selection_notes([(0, 0), (0, 96)])
+        self.assertEqual(clip, [(0, 0, 96, 48), (0, 96, 96, 50)])
+        sel = ed.paste_notes(clip, 240)                      # lands across f4 and g4
+        self.assertEqual(sel, [(0, 240), (0, 336)])
+        got = notes(ed)
+        self.assertIn((240, 96, 48), got)
+        self.assertIn((336, 96, 50), got)
+        self.assertIn((192, 48, 52), got)                    # the note before is cut short, not lost
+        self.assertEqual(ed.paste_notes(clip, 0, voice_shift=1)[0][0], 1)
+        with self.assertRaises(EditError):
+            ed.paste_notes(clip, 0, voice_shift=9)
+
+    def test_quantize(self):
+        ed = make("V1: o4 c8 r8 d4 r4 e4\n")
+        ed.add_note(0, 600, 20, 60)
+        sel = ed.quantize([(0, 600)], 96)
+        self.assertEqual(sel, [(0, 576)])
+        self.assertEqual(notes(ed)[-1], (576, 96, 60))
+        self.assertEqual(ed.undo(), "quantize")
+
+    def test_erase_notes_and_the_fuzz_of_moves(self):
+        ed = make("V1: o4 c4 d4 e4 f4\n")
+        ed.erase_notes([(0, 0), (0, 192)])
+        self.assertEqual([p for _, _, p in notes(ed)], [50, 53])
+        rnd = random.Random(5)
+        for _ in range(30):
+            ns = notes(ed)
+            if not ns:
+                break
+            pick = rnd.sample(ns, rnd.randrange(1, len(ns) + 1))
+            try:
+                ed.move_notes([(0, n[0]) for n in pick], dtick=rnd.choice((-96, -48, 48, 96, 192)), dpitch=rnd.choice((-3, 0, 5)))
+            except EditError:
+                pass
+            back = Song.from_mml(ed.song.to_mml()).compile()
+            self.assertEqual([(a.start, a.dur, a.pitch) for a in back.voices[0]], notes(ed))
+            starts = [n[0] for n in notes(ed)]
+            self.assertEqual(starts, sorted(set(starts)))
+
+
 class InstrumentTests(unittest.TestCase):
     TEXT = "V1: @lead o4 c4 d4\nV2: @lead o3 c4\nV3: o3 c4\n"
 
