@@ -193,8 +193,11 @@ roll geometry), `prefs.py` (theme, font size, scales, panel sizes, window size, 
 Piano roll with keyboard, ruler (click = where Play starts), beat/bar grid, loop-section shading, volume lane, D1/D2 lanes,
 playhead (via `TunePlayer.position` and `Tune.sample_to_tick`), scroll bars, overview strip, voice strip with M/S,
 inspector (song facts, instrument with ADSR graph, selected note), Songs list, F1 help, light/dark, font size, drop a file.
-Read-only: editing is C2. Engine additions: `Tune.sample_to_tick`, `TunePlayer.position`. Tests: `tests/test_composer.py`.
-Screenshots: `docs/composer/`.  Next: C2 (note editing, undo/redo, save).
+Engine additions: `Tune.sample_to_tick`, `TunePlayer.position`. Tests: `tests/test_composer.py`.
+Screenshots: `docs/composer/`.
+
+**C2 done** (2026-10-14): `chipsynth/songedit.py` `Editor(song, lib)` edits the Song's events (so MML export is exactly what was edited): `add_note`, `erase`, `set_pitch`, `resize`, `move`, `transpose`, `max_dur`, undo/redo (snapshots, `dirty` / `mark_saved`). Every edit keeps all other notes where they were (erase and shrink leave rests; grow eats the rest after the note), is all-or-nothing (`EditError`, song untouched), and keeps degrees as degrees and patterns as patterns (editing a note inside a pattern or repeat edits every use). `Song.compile(trace=Trace())` records which event made each note. Composer: click empty = add note (drag = length), drag = move, drag right end = resize, Delete, arrows nudge, `[` `]` snap (1/4 .. 1/16T), Ctrl+Z / Y, Ctrl+S (backup in `<root>/backups`) / Ctrl+Shift+S, `*` in the title, a warning on closing with unsaved changes. Saves a `.csp` (the whole package it came from) or `.mml`. Tests: `chipsynth/tests/test_songedit.py` (incl. random-edit fuzz on hand-written and generated songs), `EditTests` in `tests/test_composer.py`.
+Not in C2 (later): multi-select, copy / paste, quantize (C7); the toolbar hides the zoom buttons at the 960 px minimum width.  Next: C3 (voice strip and instrument inspector editing).
 
 ## Order of work
 1. Part A steps 1-3 (move, boundary test, move tests), one zip.

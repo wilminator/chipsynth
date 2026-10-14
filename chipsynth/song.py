@@ -196,6 +196,37 @@ class Clip:
 
 
 @dataclass
+class Piece:
+    """One event's contribution to the compiled tune: where a note, a held extension or a rest landed.  An event used
+    several times (a clip called twice, a repeat) gives one Piece per occurrence, all pointing at the same event."""
+    voice: int
+    start: int
+    dur: int
+    kind: str                     # "note" | "extend" | "rest"
+    event: object
+    container: list               # the list the event sits in (a track, a clip or a repeat body)
+    state: tuple                  # (octave, boundary, key) of the voice just before the event
+    pitch: int = None
+    note: object = None           # the compiled mml.Note this piece belongs to
+
+
+@dataclass
+class Trace:
+    """What `Song.compile(trace=...)` learned about where the tune came from (the composer edits through it)."""
+    pieces: list = field(default_factory=lambda: [[] for _ in range(4)])     # per melodic voice, in time order
+    ends: list = field(default_factory=lambda: [0] * 4)                      # tick where each voice's events end
+    final: list = field(default_factory=lambda: [(4, 0, None)] * 4)          # each voice's final state
+
+    def groups(self, voice):
+        """{id(compiled note): [its pieces]} for one voice."""
+        out = {}
+        for p in self.pieces[voice]:
+            if p.note is not None:
+                out.setdefault(id(p.note), []).append(p)
+        return out
+
+
+@dataclass
 class Song:
     title: str = ""
     author: str = ""
@@ -229,9 +260,10 @@ class Song:
         from .songmml import to_mml
         return to_mml(self)
 
-    def compile(self, lib=None):
-        """Expand clips and repeats into the flat `Tune` the player plays (raises MMLError on a mistake)."""
-        return _Compiler(self, lib or mml.builtin_library()).run()
+    def compile(self, lib=None, trace=None):
+        """Expand clips and repeats into the flat `Tune` the player plays (raises MMLError on a mistake).  Pass a
+        `Trace` to learn which event made each note."""
+        return _Compiler(self, lib or mml.builtin_library(), trace).run()
 
 
 # ------------------------------------------------------------------ Song -> Tune
@@ -239,8 +271,10 @@ class _Compiler:
     """Plays the events through the same voice state and note placement the MML parser uses, so a Song compiles to
     exactly the Tune that parsing its MML would give."""
 
-    def __init__(self, song, lib):
+    def __init__(self, song, lib, trace=None):
         self.song = song
+        self.trace = trace
+        self.cur = None
         p = self.p = mml._Parser("", lib)
         t = p.tune
         t.title, t.author, t.comment = song.title, song.author, song.comment
@@ -257,6 +291,11 @@ class _Compiler:
         for k, name in enumerate(TRACKS):
             v = p.voices[k] if k < 4 else p.dvoices[k - 4]
             self.play(v, self.song.tracks.get(name, ()), 0)
+        if self.trace is not None:
+            for i in range(4):
+                v = p.voices[i]
+                self.trace.ends[i] = v.pos
+                self.trace.final[i] = (v.octave, v.boundary, v.key)
         return p.finish()
 
     def err(self, msg):
@@ -264,7 +303,12 @@ class _Compiler:
 
     def play(self, v, items, depth):
         for e in items:
+            self.cur = items
             getattr(self, "do_" + type(e).__name__)(v, e, depth)
+
+    def note_piece(self, v, kind, e, start, dur, state, pitch=None):
+        if self.trace is not None and v.index < 4:
+            self.trace.pieces[v.index].append(Piece(v.index, start, dur, kind, e, self.cur, state, pitch, v.last))
 
     # ---- notes
     def do_Note(self, v, e, depth):
@@ -274,7 +318,9 @@ class _Compiler:
         pitch = v.octave * 12 + b + ((LETTER[e.letter] - b) % 12) + e.acc
         if not 0 <= pitch <= 8 * 12 + 11:
             self.err("note is out of range (octave 0 to 8)")
-        self.p.place_note(v, pitch, ticks_of(e.dur, v.deflen), 0, 0)
+        start, ticks, state = v.pos, ticks_of(e.dur, v.deflen), (v.octave, v.boundary, v.key)
+        self.p.place_note(v, pitch, ticks, 0, 0)
+        self.note_piece(v, "note", e, start, ticks, state, pitch)
 
     def do_Degree(self, v, e, depth):
         if v.key is None:
@@ -287,19 +333,25 @@ class _Compiler:
         pitch = v.octave * 12 + tonic + scale[idx % n] + 12 * (idx // n) + e.acc
         if not 0 <= pitch <= 8 * 12 + 11:
             self.err("note is out of range (octave 0 to 8)")
-        self.p.place_note(v, pitch, ticks_of(e.dur, v.deflen), 0, 0)
+        start, ticks, state = v.pos, ticks_of(e.dur, v.deflen), (v.octave, v.boundary, v.key)
+        self.p.place_note(v, pitch, ticks, 0, 0)
+        self.note_piece(v, "note", e, start, ticks, state, pitch)
 
     def do_Rest(self, v, e, depth):
-        v.pos += ticks_of(e.dur, v.deflen)
+        start, ticks, state = v.pos, ticks_of(e.dur, v.deflen), (v.octave, v.boundary, v.key)
+        v.pos += ticks
         v.tie, v.last = False, None
+        self.note_piece(v, "rest", e, start, ticks, state)
 
     def do_Tie(self, v, e, depth):
         v.tie = True
 
     def do_Extend(self, v, e, depth):
         v.tie = True
+        start, state = v.pos, (v.octave, v.boundary, v.key)
         self.p.extend(v, e.ticks, 0, 0)
         v.tie = False
+        self.note_piece(v, "extend", e, start, e.ticks, state)
 
     # ---- state
     def do_Length(self, v, e, depth):
