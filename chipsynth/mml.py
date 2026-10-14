@@ -134,6 +134,13 @@ class Tune:
         t, s, spt = br[i]
         return int(round(s + (tick - t) * spt))
 
+    def sample_to_tick(self, sample):
+        """The tick playing at `sample` (a float is fine); the inverse of tick_to_sample."""
+        br = self._breaks()
+        i = bisect.bisect_right([b[1] for b in br], sample) - 1
+        t, s, spt = br[max(0, i)]
+        return t + (sample - s) / spt
+
     @property
     def seconds(self):
         return self.tick_to_sample(self.length) / RATE

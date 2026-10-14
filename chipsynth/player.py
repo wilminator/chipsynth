@@ -148,6 +148,14 @@ class TunePlayer:
         self.volume = vol
         return (self.synth.t - start) / RATE
 
+    def position(self, lag=0.0):
+        """Where in the tune's own timeline the sound is, in samples: the play position `lag` seconds ago, folded
+        back into the loop once it passes the end (use ~0.15 s for the audio already queued ahead)."""
+        t = max(0, self.synth.t - int(lag * RATE))
+        if self._seg > 0 and self.loop and t > self._pass_len:
+            t = self._loop_s + (t - self._loop_s) % self._seg
+        return min(t, self._pass_len) if not self.loop else t
+
     @property
     def seconds(self):
         return self.synth.t / RATE

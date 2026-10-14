@@ -383,3 +383,21 @@ class GeneratorTests(unittest.TestCase):
     def test_bad_kind(self):
         with self.assertRaises(ValueError):
             musicgen.generate("nope", 1)
+
+
+class PositionTests(unittest.TestCase):
+    def test_sample_to_tick_inverts_tick_to_sample_across_tempo_changes(self):
+        t = mml.parse("tempo 120\nV1: c4 t60 d4 t200 e4 f2\n")
+        for tick in (0, 50, 96, 200, 300, 500):
+            self.assertAlmostEqual(t.sample_to_tick(t.tick_to_sample(tick)), tick, delta=0.05)
+
+    def test_player_position_folds_into_the_loop(self):
+        t = mml.parse("tempo 240\nV1: c1 loop d1 e1\n")
+        p = TunePlayer(t)
+        p.render(int(t.seconds * 44100) + 5000)
+        self.assertLessEqual(p.position(), t.tick_to_sample(t.length))
+        self.assertGreaterEqual(p.position(), t.tick_to_sample(t.loop_tick) - 1)
+        q = TunePlayer(t)
+        q.render(1000)
+        self.assertEqual(q.position(), 1000)
+        self.assertEqual(q.position(lag=10.0), 0)

@@ -184,7 +184,17 @@ library instruments / fx / scales and the DPCM samples a song uses, renaming a c
 package; a clashing package name is refused and reported), `packagetext.py` + `python -m chipsynth list|dump|build|import|export`.
 Game side: `music.toml` `tune = "forest:dawn"` (and `[tunes]` numbers) play a song from `music/forest.csp`; the maker's
 Music table tune picker lists every package song. Tests: `chipsynth/tests/test_package.py`, `tests/test_musictable.py`.
-Next: C1 (the window).
+
+**C1 done** (2026-10-14): `python -m blobs.compose [GAMEDIR] [SONG] [--nosound] [--reset]`, package `blobs/composer/`:
+`model.py` (Roll from a Tune, `tune_from` seek = remainder + loop section so a seek is seamless, `mixdown` for mute/solo,
+`View` with separate horizontal and vertical scale), `layout.py` (panels, draggable splitters, the too-small notice,
+roll geometry), `prefs.py` (theme, font size, scales, panel sizes, window size, last song; `%APPDATA%/chipsynth/composer.json`),
+`ui.py` (themes, fonts, immediate-mode widgets), `panels.py` (everything drawn), `app.py` (state, events, playback).
+Piano roll with keyboard, ruler (click = where Play starts), beat/bar grid, loop-section shading, volume lane, D1/D2 lanes,
+playhead (via `TunePlayer.position` and `Tune.sample_to_tick`), scroll bars, overview strip, voice strip with M/S,
+inspector (song facts, instrument with ADSR graph, selected note), Songs list, F1 help, light/dark, font size, drop a file.
+Read-only: editing is C2. Engine additions: `Tune.sample_to_tick`, `TunePlayer.position`. Tests: `tests/test_composer.py`.
+Screenshots: `docs/composer/`.  Next: C2 (note editing, undo/redo, save).
 
 ## Order of work
 1. Part A steps 1-3 (move, boundary test, move tests), one zip.
