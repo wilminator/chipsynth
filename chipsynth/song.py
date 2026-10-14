@@ -213,9 +213,9 @@ class Piece:
 @dataclass
 class Trace:
     """What `Song.compile(trace=...)` learned about where the tune came from (the composer edits through it)."""
-    pieces: list = field(default_factory=lambda: [[] for _ in range(4)])     # per melodic voice, in time order
-    ends: list = field(default_factory=lambda: [0] * 4)                      # tick where each voice's events end
-    final: list = field(default_factory=lambda: [(4, 0, None)] * 4)          # each voice's final state
+    pieces: list = field(default_factory=lambda: [[] for _ in range(6)])     # per voice V1-V4, D1, D2, in time order
+    ends: list = field(default_factory=lambda: [0] * 6)                      # tick where each voice's events end
+    final: list = field(default_factory=lambda: [(4, 0, None)] * 6)          # each voice's final state
 
     def groups(self, voice):
         """{id(compiled note): [its pieces]} for one voice."""
@@ -275,6 +275,7 @@ class _Compiler:
         self.song = song
         self.trace = trace
         self.cur = None
+        self.lane = 0
         p = self.p = mml._Parser("", lib)
         t = p.tune
         t.title, t.author, t.comment = song.title, song.author, song.comment
@@ -290,10 +291,11 @@ class _Compiler:
         p = self.p
         for k, name in enumerate(TRACKS):
             v = p.voices[k] if k < 4 else p.dvoices[k - 4]
+            self.lane = k
             self.play(v, self.song.tracks.get(name, ()), 0)
         if self.trace is not None:
-            for i in range(4):
-                v = p.voices[i]
+            for i in range(6):
+                v = p.voices[i] if i < 4 else p.dvoices[i - 4]
                 self.trace.ends[i] = v.pos
                 self.trace.final[i] = (v.octave, v.boundary, v.key)
         return p.finish()
@@ -307,8 +309,8 @@ class _Compiler:
             getattr(self, "do_" + type(e).__name__)(v, e, depth)
 
     def note_piece(self, v, kind, e, start, dur, state, pitch=None):
-        if self.trace is not None and v.index < 4:
-            self.trace.pieces[v.index].append(Piece(v.index, start, dur, kind, e, self.cur, state, pitch, v.last))
+        if self.trace is not None:
+            self.trace.pieces[self.lane].append(Piece(self.lane, start, dur, kind, e, self.cur, state, pitch, v.last))
 
     # ---- notes
     def do_Note(self, v, e, depth):
@@ -433,7 +435,9 @@ class _Compiler:
         if smp is None:
             self.err("no sample '%s' (declare it under [sample]; the file goes in music/samples)" % e.sample)
         self.p.tune.dac[v.dac].append((v.pos, "play", smp, (v.vol, v.pan or 0)))
-        v.pos += ticks_of(e.dur, v.deflen)
+        start, ticks = v.pos, ticks_of(e.dur, v.deflen)
+        v.pos += ticks
+        self.note_piece(v, "play", e, start, ticks, (v.octave, v.boundary, v.key))
 
     def do_Stop(self, v, e, depth):
         self.p.tune.dac[v.dac].append((v.pos, "stop", None, None))

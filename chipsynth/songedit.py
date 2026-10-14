@@ -325,6 +325,88 @@ class Editor:
             self._track(voice).insert(0, Select(name))
         return name
 
+    # ---- drum / sample lanes (D1 = lane 4, D2 = lane 5)
+    SAMPLE_NAME = re.compile(r"[A-Za-z_]+$")
+
+    def sample_names(self):
+        """Every sample a D line can play: declared in the song, in the library, held in memory or in the folder."""
+        names = set(self.song.samples) | set(self.lib.get("sample", {})) | set(self.lib.get("_mem", {}))
+        folder = self.lib.get("_sampledir")
+        if folder is not None:
+            from pathlib import Path
+            names |= {p.stem for p in Path(folder).glob("*.dpcm") if self.SAMPLE_NAME.match(p.stem)}
+        return sorted(names)
+
+    def import_sample(self, name, sample):
+        """Make `sample` (a dpcm.Sample) available to this song as `name`."""
+        if not self.SAMPLE_NAME.match(name or ""):
+            raise EditError("a sample name is letters and _ only")
+        def run():
+            self.lib.setdefault("_mem", {})[name] = dataclasses.replace(sample, name=name)
+            self.song.samples[name] = (name, None)
+        return self.change("import sample", run)
+
+    def find_hit(self, lane, start):
+        for p in self.trace.pieces[lane]:
+            if p.kind == "play" and p.start == start:
+                return p
+        return None
+
+    def add_hit(self, lane, start, sample, dur):
+        return self.change("add hit", lambda: self._add_hit(lane, start, sample, dur))
+
+    def erase_hit(self, lane, start):
+        return self.change("erase hit", lambda: self._erase_hit(lane, start))
+
+    def move_hit(self, lane, start, new_start):
+        def run():
+            p = self.find_hit(lane, start)
+            if p is None:
+                raise EditError("no hit there")
+            sample, dur = p.event.sample, p.dur
+            self._erase_hit(lane, start)
+            self._add_hit(lane, new_start, sample, dur)
+        return self.change("move hit", run)
+
+    def set_hit_sample(self, lane, start, sample):
+        def run():
+            p = self.find_hit(lane, start)
+            if p is None:
+                raise EditError("no hit there")
+            p.event.sample = sample
+        return self.change("change sample", run)
+
+    def _add_hit(self, lane, start, sample, dur):
+        if dur < 1 or start < 0:
+            raise EditError("bad hit")
+        self._check(dur)
+        end = start + dur
+        ev = Play(sample, dur)
+        if start >= self.trace.ends[lane]:
+            gap = start - self.trace.ends[lane]
+            self._check(gap)
+            self._track(lane).extend(self._rests(gap, None) + [ev])
+        else:
+            run = self._rest_run(lane, start, end)
+            if run is None:
+                raise EditError("no room there")
+            first = run[0]
+            a, b = start - first.start, run[-1].start + run[-1].dur - end
+            self._check(a, b)
+            c = first.container
+            i = _index(c, first.event)
+            c[i:i + len(run)] = self._rests(a, None) + [ev] + self._rests(b, None)
+        self.refresh()
+
+    def _erase_hit(self, lane, start):
+        p = self.find_hit(lane, start)
+        if p is None:
+            raise EditError("no hit there")
+        self._check(p.dur)
+        self._replace(p.container, p.event, [Rest(p.dur)])
+        self._merge_rests([p.container])
+        self.refresh()
+
     # ---- the pieces of an edit
     def _track(self, voice):
         return self.song.tracks.setdefault(TRACKS[voice], [])

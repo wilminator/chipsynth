@@ -3,7 +3,9 @@
 import random
 import unittest
 
-from chipsynth import mml, musicgen
+import numpy as np
+
+from chipsynth import dpcm, mml, musicgen
 from chipsynth.song import Song
 from chipsynth.songedit import Editor, EditError
 
@@ -202,6 +204,60 @@ class InstrumentTests(unittest.TestCase):
             ed.set_voice_instrument(0, "nosuch")
         ed.undo(); ed.undo()
         self.assertIsNone(ed.voice_instrument(2))
+
+
+def kick():
+    t = np.arange(3000) / 44100.0
+    return dpcm.convert(np.sin(2 * np.pi * 90 * t) * np.exp(-t * 30), 44100, rate=12, name="kick")
+
+
+def hits(ed, lane=0):
+    return [e[0] for e in ed.tune.dac[lane] if e[1] == "play"]
+
+
+class DacTests(unittest.TestCase):
+    def make(self, text="V1: c4 d4 e4 f4\n"):
+        lib = mml.builtin_library()
+        lib["_mem"] = {"kick": kick()}
+        return Editor(Song.from_mml(text, lib), lib)
+
+    def test_import_names_and_lists_the_sample(self):
+        ed = self.make()
+        self.assertIn("kick", ed.sample_names())
+        ed.import_sample("snare", kick())
+        self.assertIn("snare", ed.sample_names())
+        self.assertIn("snare", ed.song.samples)
+        with self.assertRaises(EditError):
+            ed.import_sample("bad name!", kick())
+
+    def test_add_move_erase_hits(self):
+        ed = self.make()
+        ed.add_hit(4, 0, "kick", 96)
+        ed.add_hit(4, 192, "kick", 96)
+        self.assertEqual(hits(ed), [0, 192])
+        ed.move_hit(4, 192, 96)
+        self.assertEqual(hits(ed), [0, 96])
+        with self.assertRaises(EditError):
+            ed.move_hit(4, 96, 0)                      # onto the other hit
+        ed.erase_hit(4, 0)
+        self.assertEqual(hits(ed), [96])
+        back = Song.from_mml(ed.song.to_mml(), ed.lib).compile(ed.lib)
+        self.assertEqual([e[0] for e in back.dac[0] if e[1] == "play"], [96])
+
+    def test_a_second_lane_and_undo(self):
+        ed = self.make()
+        ed.add_hit(5, 96 * 3, "kick", 48)
+        self.assertEqual(hits(ed, 1), [288])
+        ed.undo()
+        self.assertEqual(hits(ed, 1), [])
+
+    def test_hits_in_a_pattern_and_unknown_sample(self):
+        ed = self.make("[pat]\np = kick4 r4\nD1: !p !p\nV1: c4\n[sample]\nkick\n")
+        self.assertEqual(hits(ed), [0, 192])
+        ed.set_hit_sample(4, 0, "kick")
+        with self.assertRaises(EditError):
+            ed.set_hit_sample(4, 0, "nosuch")
+        self.assertEqual(hits(ed), [0, 192])
 
 
 class FuzzTests(unittest.TestCase):
