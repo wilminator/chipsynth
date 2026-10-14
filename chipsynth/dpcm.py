@@ -234,7 +234,7 @@ def demo_wavs(folder):
 
 def main(argv=None):
     import argparse
-    ap = argparse.ArgumentParser(prog="python -m blobs.dpcm", description="WAV -> Blobs DAC samples (music/samples)")
+    ap = argparse.ArgumentParser(prog="python -m chipsynth.dpcm", description="WAV -> Blobs DAC samples (music/samples)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo", help="write kick/snare/zap demo WAVs into GAMEDIR/music/wav")
     d.add_argument("gamedir")

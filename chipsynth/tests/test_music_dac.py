@@ -244,6 +244,16 @@ if __name__ == "__main__":
 
 
 class CommandLineTests(unittest.TestCase):
+    def test_runs_as_a_module_by_both_names(self):
+        import subprocess
+        import sys
+        root = str(Path(__file__).resolve().parents[2])
+        for name in ("chipsynth.dpcm", "blobs.dpcm"):
+            with tempfile.TemporaryDirectory() as d:
+                out = subprocess.run([sys.executable, "-m", name, "demo", d], cwd=root, capture_output=True, text=True)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertTrue((Path(d) / "music" / "wav" / "kick.wav").is_file(), name)
+
     def test_demo_and_convert(self):
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(dpcm.main(["demo", d]), 0)
