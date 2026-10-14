@@ -175,7 +175,16 @@ a pattern is note-kind or DAC-kind, not both; an uncalled pattern that does not 
 patterns are copied into the song when used, library instruments / fx / scales stay references until the package
 step embeds them (C0b); lengths are tick counts written back as the fewest tokens (`4&16`); import drops inline
 `//` comments and keeps own-line ones. Limits: a tie into a scale degree and lengths of 1, 2, 3, 5, 7, 11 ticks have no
-MML spelling (`SongError`). Next: C0b.
+MML spelling (`SongError`).
+
+**C0b done** (2026-10-14): `chipsynth/package.py` (the `.csp` binary: META INST FXSE SCAL SAMP SONG chunks, varints,
+append-only event tags, atomic deterministic save, newer major refused, unknown chunks skipped; `add_song` embeds the
+library instruments / fx / scales and the DPCM samples a song uses, renaming a clashing sample `kick_a`),
+`packageset.py` (`PackageSet`: `add`, `add_folder`, `songs`, `get`, `tune`, `player`; a bare `.mml` is a one-song
+package; a clashing package name is refused and reported), `packagetext.py` + `python -m chipsynth list|dump|build|import|export`.
+Game side: `music.toml` `tune = "forest:dawn"` (and `[tunes]` numbers) play a song from `music/forest.csp`; the maker's
+Music table tune picker lists every package song. Tests: `chipsynth/tests/test_package.py`, `tests/test_musictable.py`.
+Next: C1 (the window).
 
 ## Order of work
 1. Part A steps 1-3 (move, boundary test, move tests), one zip.
