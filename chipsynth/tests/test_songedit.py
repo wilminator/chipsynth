@@ -151,6 +151,59 @@ class HistoryTests(unittest.TestCase):
         self.assertFalse(ed.can_redo())
 
 
+class InstrumentTests(unittest.TestCase):
+    TEXT = "V1: @lead o4 c4 d4\nV2: @lead o3 c4\nV3: o3 c4\n"
+
+    def test_edit_changes_every_voice_using_it_and_survives_mml(self):
+        ed = make(self.TEXT)
+        self.assertEqual(ed.voice_instrument(0), "lead")
+        self.assertIsNone(ed.voice_instrument(2))
+        ed.edit_instrument("lead", a=3, filt="lp", filt_cut=5, wave="saw")
+        for v in (0, 1):
+            i = ed.tune.voices[v][0].inst
+            self.assertEqual((i.a, i.filt, i.filt_cut, i.wave), (3, "lp", 5, "saw"))
+        back = Song.from_mml(ed.song.to_mml()).compile()
+        self.assertEqual(back.voices[1][0].inst, ed.tune.voices[1][0].inst)
+
+    def test_bad_values_are_refused_and_change_nothing(self):
+        ed = make(self.TEXT)
+        for bad in ({"vol": 16}, {"wave": "zip"}, {"nope": 1}, {"pan": -9}):
+            with self.assertRaises(EditError):
+                ed.edit_instrument("lead", **bad)
+        with self.assertRaises(EditError):
+            ed.edit_instrument("nosuch", vol=1)
+        self.assertFalse(ed.can_undo())
+
+    def test_own_copy_leaves_the_other_voice_alone(self):
+        ed = make(self.TEXT)
+        name = ed.copy_instrument(1)
+        self.assertEqual(ed.voice_instrument(1), name)
+        ed.edit_instrument(name, vol=3)
+        self.assertEqual(ed.tune.voices[1][0].inst.vol, 3)
+        self.assertNotEqual(ed.tune.voices[0][0].inst.vol, 3)
+
+    def test_editing_a_voice_with_no_instrument_makes_its_own_in_one_step(self):
+        ed = make(self.TEXT)
+        ed.edit_voice_instrument(2, vol=7, wave="tri")
+        self.assertEqual(ed.tune.voices[2][0].inst.vol, 7)
+        self.assertEqual(ed.voice_instrument(2), "voice3")
+        self.assertEqual(ed.undo(), "edit instrument")
+        self.assertIsNone(ed.voice_instrument(2))
+        self.assertFalse(ed.can_undo())
+
+    def test_pick_another_instrument(self):
+        ed = make(self.TEXT)
+        ed.set_voice_instrument(2, "bass")
+        self.assertEqual(ed.voice_instrument(2), "bass")
+        ed.set_voice_instrument(0, "bell")
+        self.assertEqual(ed.voice_instrument(0), "bell")
+        self.assertEqual(ed.voice_instrument(1), "lead")
+        with self.assertRaises(EditError):
+            ed.set_voice_instrument(0, "nosuch")
+        ed.undo(); ed.undo()
+        self.assertIsNone(ed.voice_instrument(2))
+
+
 class FuzzTests(unittest.TestCase):
     def run_fuzz(self, text, seed, steps=40):
         rnd = random.Random(seed)

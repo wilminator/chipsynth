@@ -14,15 +14,27 @@ was.  A note that lives in a pattern or a repeat is edited in the pattern: every
 An edit that cannot work (no room, an unwritable length, a note out of range) raises `EditError` and changes nothing.
 """
 import copy
+import dataclasses
+import re
 
 from . import mml
 from .mml import MMLError, LETTER
-from .song import (Note, Degree, Rest, Extend, Octave, Trace, TRACKS, SongError)
+from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Trace, TRACKS, SongError)
+from .synth import WAVES, Instrument
 from .songmml import length_pieces
 
 
 class EditError(Exception):
     pass
+
+
+NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]*$")
+# instrument field -> (low, high) for numbers, or the allowed words
+FIELDS = {"pw": (1, 99), "a": (0, 15), "d": (0, 15), "s": (0, 15), "r": (0, 15), "vol": (0, 15), "pan": (-8, 8),
+          "vib_rate": (0, 15), "vib_depth": (0, 15), "slide": (0, 192), "arprate": (1, 32),
+          "filt_cut": (0, 15), "filt_res": (0, 15), "send": (0, 15), "pws_from": (0, 99), "pws_to": (0, 99),
+          "pws_rate": (0, 15), "fs_from": (0, 15), "fs_to": (0, 15), "fs_rate": (0, 15),
+          "wave": WAVES, "nmode": ("long", "short"), "filt": ("", "lp", "bp", "hp")}
 
 
 MAX_PITCH = 8 * 12 + 11
@@ -215,6 +227,103 @@ class Editor:
                 # the first pass changed only pitches, so every other note is still where we noted it
             return None
         return self.change("transpose", run)
+
+    # ---- instruments
+    def instrument_names(self):
+        """Every instrument name a voice can use: the song's own, then the library's."""
+        return sorted({*self.song.instruments, *self.lib["instr"]})
+
+    def instrument(self, name):
+        return self.song.instruments.get(name) or self.lib["instr"].get(name)
+
+    def _first_select(self, items, depth=0):
+        for e in items:
+            if isinstance(e, Select):
+                return e
+            if isinstance(e, Repeat) and depth < 8:
+                r = self._first_select(e.items, depth + 1)
+                if r is not None:
+                    return r
+            if isinstance(e, Call) and e.name in self.song.clips and depth < 8:
+                r = self._first_select(self.song.clips[e.name].items, depth + 1)
+                if r is not None:
+                    return r
+            if isinstance(e, (Note, Degree, Rest, Play, Extend)):
+                return None
+        return None
+
+    def voice_instrument(self, voice):
+        """The name the voice selects before its first sound, or None (it plays the default instrument)."""
+        e = self._first_select(self.song.tracks.get(TRACKS[voice], ()))
+        return e.name if e else None
+
+    def edit_instrument(self, name, **fields):
+        """Change fields of instrument `name` (for this song: a library instrument becomes the song's own copy)."""
+        return self.change("edit instrument", lambda: self._edit(name, fields))
+
+    def _edit(self, name, fields):
+        base = self.instrument(name)
+        if base is None:
+            raise EditError("no instrument '%s'" % name)
+        for k, v in fields.items():
+            rule = FIELDS.get(k)
+            if rule is None:
+                raise EditError("unknown instrument field '%s'" % k)
+            if isinstance(rule[0], str):
+                if v not in rule:
+                    raise EditError("%s is one of %s" % (k, ", ".join(w or "off" for w in rule)))
+            elif not rule[0] <= v <= rule[1]:
+                raise EditError("%s is %d to %d" % (k, rule[0], rule[1]))
+        self.song.instruments[name] = dataclasses.replace(base, **fields)
+
+    def edit_voice_instrument(self, voice, **fields):
+        """Edit what the voice plays; a voice that selects no instrument first gets its own named copy of the
+        default one.  One undo step."""
+        def run():
+            name = self.voice_instrument(voice)
+            if name is None:
+                name = self._copy(voice, None)
+            self._edit(name, fields)
+            return name
+        return self.change("edit instrument", run)
+
+    def set_voice_instrument(self, voice, name):
+        def run():
+            if self.instrument(name) is None:
+                raise EditError("no instrument '%s'" % name)
+            e = self._first_select(self.song.tracks.get(TRACKS[voice], ()))
+            if e is not None:
+                e.name = name
+            else:
+                self._track(voice).insert(0, Select(name))
+        return self.change("change instrument", run)
+
+    def copy_instrument(self, voice, new=None):
+        """Give the voice its own copy of the instrument it plays, so editing it leaves other voices alone."""
+        return self.change("copy instrument", lambda: self._copy(voice, new))
+
+    def _copy(self, voice, new):
+        old = self.voice_instrument(voice)
+        base = self.instrument(old) if old else None
+        if base is None:
+            notes = self.tune.voices[voice]
+            base = notes[0].inst if notes else Instrument()
+        stem = (new or old or "voice%d" % (voice + 1))
+        if not NAME.match(stem):
+            raise EditError("an instrument name is letters, digits, - and _")
+        name, n = stem, 1
+        while new is None and (name in self.song.instruments or name in self.lib["instr"]):
+            n += 1
+            name = "%s%d" % (stem, n)
+        if name in self.song.instruments or name in self.lib["instr"]:
+            raise EditError("there is already an instrument called '%s'" % name)
+        self.song.instruments[name] = dataclasses.replace(base)
+        e = self._first_select(self.song.tracks.get(TRACKS[voice], ()))
+        if e is not None:
+            e.name = name
+        else:
+            self._track(voice).insert(0, Select(name))
+        return name
 
     # ---- the pieces of an edit
     def _track(self, voice):
