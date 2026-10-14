@@ -153,6 +153,34 @@ class HistoryTests(unittest.TestCase):
         self.assertFalse(ed.can_redo())
 
 
+class PutNoteTests(unittest.TestCase):
+    def test_enter_into_empty_space_and_replace(self):
+        ed = make("V1: o4 c4 r4 e4\n")
+        self.assertEqual(ed.put_note(0, 96, 62, 24), 24)
+        self.assertEqual(notes(ed)[1], (96, 24, 62))
+        ed.put_note(0, 96, 64, 24)                          # same row: pitch changes, length stays
+        self.assertEqual(notes(ed)[1], (96, 24, 64))
+        self.assertEqual(ed.undo(), "enter note")
+        self.assertEqual(notes(ed)[1], (96, 24, 62))
+
+    def test_entering_inside_a_held_note_cuts_it(self):
+        ed = make("V1: o4 c2 e4\n")
+        ed.put_note(0, 96, 60, 96)
+        self.assertEqual(notes(ed), [(0, 96, 48), (96, 96, 60), (192, 96, 52)])
+        self.assertEqual(ed.undo(), "enter note")            # one step
+        self.assertEqual(notes(ed), [(0, 192, 48), (192, 96, 52)])
+
+    def test_the_new_note_stops_at_the_next_one(self):
+        ed = make("V1: o4 c4 r4 e4\n")
+        self.assertEqual(ed.put_note(0, 144, 60, 96), 48)
+        self.assertEqual(notes(ed)[1], (144, 48, 60))
+
+    def test_past_the_end(self):
+        ed = make("V1: o4 c4\n")
+        ed.put_note(0, 480, 60, 24)
+        self.assertEqual(notes(ed)[-1], (480, 24, 60))
+
+
 class InstrumentTests(unittest.TestCase):
     TEXT = "V1: @lead o4 c4 d4\nV2: @lead o3 c4\nV3: o3 c4\n"
 
@@ -365,13 +393,17 @@ class FuzzTests(unittest.TestCase):
                     continue
                 grid = rnd.choice((24, 48, 96))
                 if op == "add":
-                    ed.add_note(v, rnd.randrange(0, 40) * grid, grid, rnd.randrange(30, 90))
+                    at, want = rnd.randrange(0, 40) * grid, rnd.randrange(30, 90)
+                    ed.add_note(v, at, grid, want)
+                    self.assertEqual(ed.tune.voices[v][ed.find(v, at)].pitch, want, (seed, "add"))
                 elif n:
                     i = rnd.randrange(n)
                     if op == "erase":
                         ed.erase(v, i)
                     elif op == "pitch":
-                        ed.set_pitch(v, i, rnd.randrange(12, 100))
+                        want, at = rnd.randrange(12, 100), ed.tune.voices[v][i].start
+                        ed.set_pitch(v, i, want)
+                        self.assertEqual(ed.tune.voices[v][ed.find(v, at)].pitch, want, (seed, "pitch"))
                     elif op == "resize":
                         ed.resize(v, i, rnd.randrange(1, 12) * 24)
                     else:

@@ -93,6 +93,8 @@ def _unwrap(container, event):
                 and a.boundary is None and b.boundary is None and a.shift and a.shift == -b.shift):
             del container[i + 1]
             del container[i - 1]
+            return a.shift
+    return 0
 
 
 def _set_ticks(ev, ticks):
@@ -211,6 +213,29 @@ class Editor:
 
     def move(self, voice, index, start, pitch):
         return self.change("move note", lambda: self._move(voice, index, start, pitch))
+
+    def put_note(self, voice, tick, pitch, dur):
+        """Tracker-style entry: sound `pitch` at `tick` for up to `dur` ticks.  A note that starts there changes
+        pitch (keeping its length); a note running through `tick` is cut short there; the new note stops where the
+        next one starts.  Returns the length used."""
+        def run():
+            notes = self.tune.voices[voice]
+            hit = next((i for i, n in enumerate(notes) if n.start == tick), None)
+            if hit is not None:
+                self._set_pitch(voice, hit, pitch)
+                return notes[hit].dur
+            cover = next((i for i, n in enumerate(notes) if n.start < tick < n.start + n.dur), None)
+            if cover is not None:
+                self._resize(voice, cover, tick - notes[cover].start)
+            nxt = min((n.start for n in self.tune.voices[voice] if n.start > tick), default=None)
+            use = dur if nxt is None else min(dur, nxt - tick)
+            if use < 1:
+                raise EditError("no room there")
+            while use > 1 and not writable(use):
+                use -= 1
+            self._add(voice, tick, use, pitch)
+            return use
+        return self.change("enter note", run)
 
     def transpose(self, notes, semitones):
         """`notes` is [(voice, index)].  All or nothing."""
@@ -702,9 +727,10 @@ class Editor:
             if p.kind != "note" or id(p.event) in done:
                 continue
             done.add(id(p.event))
-            before, ev, after = spell(pitch, p.state)
-            ev.dur = p.event.dur if isinstance(p.event.dur, int) else p.dur
-            _unwrap(p.container, p.event)
+            ev_dur = p.event.dur if isinstance(p.event.dur, int) else p.dur
+            shift = _unwrap(p.container, p.event)             # the state we were given includes that shift
+            before, ev, after = spell(pitch, (p.state[0] - shift, p.state[1], p.state[2]))
+            ev.dur = ev_dur
             self._replace(p.container, p.event, before + [ev] + after)
         self.refresh()
 
