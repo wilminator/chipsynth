@@ -19,7 +19,8 @@ import re
 
 from . import mml
 from .mml import MMLError, LETTER
-from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Tempo, Loop, Trace, TRACKS, SongError)
+from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Tempo, Loop, Trace, Clip, TRACKS,
+                   SongError)
 from .synth import WAVES, Instrument
 from .songmml import length_pieces
 
@@ -95,6 +96,10 @@ def _unwrap(container, event):
             del container[i - 1]
             return a.shift
     return 0
+
+
+def _is_shift(e):
+    return isinstance(e, Octave) and e.set is None and e.boundary is None and e.shift != 0
 
 
 def _set_ticks(ev, ticks):
@@ -638,6 +643,45 @@ class Editor:
                 new = [copy.deepcopy(x) for _ in range(ev.count) for x in ev.items]
             self._replace(container, ev, new)
         return self.change("make unique", run)
+
+    def make_pattern(self, selection, name):
+        """Move the selected notes of one voice (and everything between the first and the last) into a new pattern
+        `name`, leaving a call to it where they were.  The song must sound exactly the same afterwards, or nothing
+        changes.  Returns the name."""
+        def run():
+            if not NAME.match(name or ""):
+                raise EditError("a pattern name is letters, digits, - and _")
+            if name in self.song.clips:
+                raise EditError("there is already a pattern called '%s'" % name)
+            notes = self.selection_notes(selection)
+            if not notes:
+                raise EditError("nothing selected")
+            if len({n[0] for n in notes}) > 1:
+                raise EditError("select notes of one voice to make a pattern")
+            voice = notes[0][0]
+            if voice > 3:
+                raise EditError("patterns are made from the melodic voices")
+            t0, t1 = min(n[1] for n in notes), max(n[1] + n[2] for n in notes)
+            pieces = [p for p in self.trace.pieces[voice] if t0 <= p.start < t1]
+            if any(p.stack for p in pieces):
+                raise EditError("part of this is already inside a pattern or a repeat")
+            if any(p.kind not in ("note", "extend", "rest") for p in pieces):
+                raise EditError("a tempo or loop marker is in the way")
+            if len({id(p.container) for p in pieces}) != 1:
+                raise EditError("those notes are not in one place in the song")
+            c = pieces[0].container
+            lo, hi = _index(c, pieces[0].event), _index(c, pieces[-1].event)
+            while (lo > 0 and hi < len(c) - 1 and _is_shift(c[lo - 1]) and _is_shift(c[hi + 1])
+                   and c[lo - 1].shift == -c[hi + 1].shift):
+                lo, hi = lo - 1, hi + 1
+            before = [[(n.start, n.dur, n.pitch) for n in v] for v in self.tune.voices]
+            self.song.clips[name] = Clip(name, c[lo:hi + 1])
+            c[lo:hi + 1] = [Call(name)]
+            self.refresh()
+            if [[(n.start, n.dur, n.pitch) for n in v] for v in self.tune.voices] != before:
+                raise EditError("that stretch cannot become a pattern without changing the sound")
+            return name
+        return self.change("make pattern", run)
 
     # ---- drum / sample lanes (D1 = lane 4, D2 = lane 5)
     SAMPLE_NAME = re.compile(r"[A-Za-z_]+$")

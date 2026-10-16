@@ -497,3 +497,64 @@ class FuzzTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MakePatternTests(unittest.TestCase):
+    def sel(self, ed, v, starts):
+        return [(v, s) for s in starts]
+
+    def test_notes_become_a_pattern_and_the_sound_is_unchanged(self):
+        ed = make("tempo 120\nV1: o4 c4 d4 e4 f4 g4 a4\n")
+        before = notes(ed)
+        self.assertEqual(ed.make_pattern(self.sel(ed, 0, [96, 192, 288]), "mid"), "mid")
+        self.assertEqual(notes(ed), before)
+        self.assertIn("mid", ed.song.clips)
+        self.assertEqual(ed.clip_uses()["mid"], 1)
+        again = Song.from_mml(ed.song.to_mml()).compile()
+        self.assertEqual(notes(ed), [(n.start, n.dur, n.pitch) for n in again.voices[0]])
+        ed.undo()
+        self.assertNotIn("mid", ed.song.clips)
+        self.assertEqual(notes(ed), before)
+
+    def test_notes_inside_the_new_pattern_know_it_and_can_still_be_edited(self):
+        ed = make("tempo 120\nV1: o4 c4 d4 e4 r4 c4\n")
+        ed.make_pattern(self.sel(ed, 0, [0, 96, 192]), "riff")
+        self.assertEqual(ed.inside(0, 0), [("pattern", "riff")])
+        self.assertEqual(ed.inside(0, 3), [])
+        ed.set_pitch(0, 1, 55)
+        self.assertEqual([p for _, _, p in notes(ed)], [48, 55, 52, 48])
+
+    def test_octave_shifted_notes_keep_their_pitch(self):
+        ed = make("tempo 120\nV1: o4 c4 d4 e4 f4\n")
+        ed.set_pitch(0, 1, 74)
+        before = notes(ed)
+        ed.make_pattern(self.sel(ed, 0, [96, 192]), "hi")
+        self.assertEqual(notes(ed), before)
+
+    def test_refusals_change_nothing(self):
+        ed = make("tempo 120\nV1: o4 c4 d4 e4\nV2: o4 c4 d4\n")
+        text = ed.song.to_mml()
+        for sel, name in ((self.sel(ed, 0, [0]), "bad name"), ([], "x"), ([(0, 0), (1, 0)], "x")):
+            with self.assertRaises(EditError):
+                ed.make_pattern(sel, name)
+        ed.make_pattern(self.sel(ed, 0, [0, 96]), "a")
+        with self.assertRaises(EditError):                      # the name is taken
+            ed.make_pattern(self.sel(ed, 1, [0]), "a")
+        with self.assertRaises(EditError):                      # already inside a pattern
+            ed.make_pattern(self.sel(ed, 0, [0]), "b")
+        self.assertEqual(ed.song.clips.keys(), {"a"})
+        ed.undo()
+        self.assertEqual(ed.song.to_mml(), text)
+
+    def test_fuzz_sound_never_changes(self):
+        rng = random.Random(11)
+        for _ in range(40):
+            ed = make("tempo 120\nV1: o4 " + " ".join(rng.choice("cdefgab") + rng.choice("48") for _ in range(10)) + "\n")
+            before = notes(ed)
+            i = rng.randrange(len(before) - 1)
+            j = rng.randrange(i + 1, len(before))
+            try:
+                ed.make_pattern([(0, before[k][0]) for k in (i, j)], "p")
+            except EditError:
+                pass
+            self.assertEqual(notes(ed), before)

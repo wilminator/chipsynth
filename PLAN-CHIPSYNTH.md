@@ -218,3 +218,5 @@ Not in C2 (later): multi-select, copy / paste, quantize (C7); the toolbar hides 
    Confirming depth with you before each milestone (your credits rule).
 4. Still open from earlier and slotted in when you say: generator use of effects / degrees / echo / filter, FamiStudio
    and SID imports (they land in `chipsynth` as importers into `Song` once it exists), packaging for PyPI.
+
+COMPOSER C8 (2026-10-15) DONE: make pattern from selection (P; Editor.make_pattern checks the sound is unchanged), loop just the selection (Shift+Space; model.tune_range), New from generator (Ctrl+N / New button; asks "kind [seed] [mood]"). NEXT (backlog): tracker volume column, key / per-note effects from the roll, WAV import options, MIDI drums onto D1/D2.
