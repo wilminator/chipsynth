@@ -1,0 +1,30 @@
+// generated: kind=boss mood=- seed=4 tempo=135 sum=a9462bbc
+title Boss 4
+author Blobs generator
+comment boss in phrygian, 135 bpm
+tempo 135
+time 4/4
+
+// bars 1-4
+V1: l8 v14 pan 0 @buzz 4f16 a16 a# 5c 4g r r g d# | d4. d# d#4 f4 | f16 a16 a# 5c 4g r r g d# | d4. d# d#4 d4 |
+V2: l8 v9 pan -3 @arp 4d f a f a# 5d f d | 4g a# 5d 4a# a 5c d# c | 4d f a f a# 5d f d | 4g a# 5d 4a# a 5c d# c |
+V3: l8 v13 pan 0 @sawbass 2d d 3d 2d a# a# 3a# 2a# | g g 3g 2g a a 3a 2a | d d 3d 2d a# a# 3a# 2a# | g g 3g 2g a a 3a 2a |
+V4: l8 v12 pan 2 @crash 6c r16 @kick 2c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g16 g16 g16 g16 |
+
+// bars 5-8
+V1: d4 3a4 a#4 r4 | 4d4 d#4 d#4 r4 | f16 a16 a# 5c 4g r r g d# | d4. d# d#4 f4 |
+V2: 4d f a f a# 5d f d | 4g a# 5d 4a# a 5c d# c | 4d f a f a# 5d f d | 4g a# 5d 4a# a 5c d# c |
+V3: d d 3d 2d a# a# 3a# 2a# | g g 3g 2g a a 3a 2a | d d 3d 2d a# a# 3a# 2a# | g g 3g 2g a a 3a 2a |
+V4: @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g16 g16 g16 g16 |
+
+// bars 9-12
+V1: a a#16 5c16 4a a# r4 a#4 | a#2 5c4 4a# 5d | 4a a#16 5c16 4a a# r4 a#4 | a#2 5c4 4a a# |
+V2: 4d f a f a# 5d f d | 4g a# 5d 4a# a 5c d# c | 4d f a f a# 5d f d | 4g a# 5d 4a# a 5c d# c |
+V3: d d 3d 2d a# a# 3a# 2a# | g g 3g 2g a a 3a 2a | d d 3d 2d a# a# 3a# 2a# | g g 3g 2g a a 3a 2a |
+V4: @crash 6c r16 @kick 2c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g16 g16 g16 g16 |
+
+// bars 13-16
+V1: f d r4 d4 d#4 | d4 d#4 d# f f4 | f16 a16 a# 5c 4g r r g d# | d4. d# d#4 f4 |
+V2: 4d f a f a# 5d f d | 4g a# 5d 4a# a 5c d# c | 4d f a f a# 5d f d | 4g a# 5d 4a# a 5c d# c |
+V3: d d 3d 2d a# a# 3a# 2a# | g g 3g 2g a a 3a 2a | d d 3d 2d a# a# 3a# 2a# | g g 3g 2g a a 3a 2a |
+V4: @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g @hat 7c | @kick 2c r16 c16 @snare 5g @hat 7c @kick 2c r16 c16 @snare 5g16 g16 g16 g16 |

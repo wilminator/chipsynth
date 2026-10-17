@@ -1,3 +1,4 @@
+# Copyright (C) 2026 Michael Allen Wilmes
 import sys, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

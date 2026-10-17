@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
-"""chipsynth must stay a library: it never imports the game (blobs), and pygame only inside output.py, lazily."""
+"""chipsynth must stay a library: it never imports the game (blobs), and pygame only inside output.py (lazily) and the composer/ subpackage."""
 import ast
 import sys
 import unittest
@@ -30,22 +30,33 @@ class BoundaryTests(unittest.TestCase):
     def files(self):
         return sorted(p for p in PKG.glob("*.py"))
 
+    def composer_files(self):
+        return sorted((PKG / "composer").glob("*.py"))
+
     def test_never_imports_the_game(self):
-        for p in self.files() + sorted((PKG / "tests").glob("*.py")):
+        for p in self.files() + self.composer_files() + sorted((PKG / "tests").glob("*.py")):
             for mod, level, _ in imports(p):
                 self.assertNotEqual(mod, "blobs", "%s imports the game" % p.name)
 
     def test_only_numpy_and_scipy_besides_the_standard_library(self):
         std = set(sys.stdlib_module_names)
-        for p in self.files():
+        for p in self.files() + self.composer_files():
+            in_composer = p.parent.name == "composer"
             for mod, level, lazy in imports(p):
                 if level or mod in std or mod == "chipsynth":
                     continue
                 if mod == "pygame":
+                    if in_composer:
+                        continue                # the composer is the optional extra that needs pygame
                     self.assertEqual(p.name, "output.py", "%s imports pygame" % p.name)
                     self.assertTrue(lazy, "output.py must import pygame lazily")
                     continue
                 self.assertIn(mod, ALLOWED, "%s imports %s" % (p.name, mod))
+
+    def test_composer_relative_imports_stay_inside_the_package(self):
+        for p in self.composer_files():
+            for mod, level, _ in imports(p):
+                self.assertLessEqual(level, 1, "%s reaches above composer/" % p.name)
 
     def test_the_core_loads_without_pygame_or_the_game(self):
         import subprocess

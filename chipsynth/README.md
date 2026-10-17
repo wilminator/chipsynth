@@ -42,8 +42,22 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 The tune language is described in `DESIGN-MUSIC.md` (project root) and, shorter, on the Music editor's help pages.
 Rendering is exact: the same samples come out however the output is cut into blocks.
 
+## The song composer (optional, needs pygame)
+
+`chipsynth/composer/` is a resizable piano-roll / tracker window for writing songs. It is an optional extra: the rest of
+the library never imports it, and it is the only part that imports pygame at the top of a module (install `pygame`
+yourself). It imports nothing from the Blobs game.
+
+    python -m chipsynth.composer [GAMEDIR] [SONG] [--nosound] [--reset]
+
+`python -m chipsynth.compose` is the same command. GAMEDIR is a folder with a `music/` folder (loose `.mml` files, `.csp`
+packages, `music/lib`); SONG is a song id like `forest:dawn` or a `.mml` / `.csp` path. With no arguments it opens a
+generated tune.
+
 ## Tests
 
     python -m unittest discover -t . -s chipsynth/tests      (from the project root)
 
-`tests/test_boundary.py` fails if the library ever imports the game or anything beyond numpy and scipy.
+`tests/test_boundary.py` fails if the library ever imports the game or anything beyond numpy and scipy (pygame is allowed
+only lazily in `output.py` and in `composer/`). The suite needs nothing outside this directory (test data is in
+`tests/data/`), so it also runs from a standalone checkout of chipsynth.

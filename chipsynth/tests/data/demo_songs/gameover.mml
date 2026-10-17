@@ -1,0 +1,12 @@
+// generated: kind=gameover mood=- seed=3 tempo=60 sum=cae2126f
+title Gameover 3
+author Blobs generator
+comment gameover in minor, 60 bpm
+tempo 60
+time 4/4
+once
+
+// bars 1-4
+V1: l8 v14 pan 0 @flute 5d4. c# d2 | e4 c#4 4b4 5d4 | c#4. c# c#2 | 4b1 |
+V2: l8 v9 pan -3 @bell 5d4 r4 b4 r4 | r2 r2 | 6f#4 r4 r2 | 5f#1 |
+V3: l8 v13 pan 0 @pad 2b2 b2 | 3e2 e2 | f#2 f#2 | 2b1 |

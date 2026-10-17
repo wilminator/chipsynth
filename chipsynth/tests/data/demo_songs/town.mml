@@ -1,0 +1,16 @@
+// generated: kind=town mood=calm seed=2 tempo=88 sum=f52845ae
+title Town 2 (calm)
+author Blobs generator
+comment town in major, 88 bpm
+tempo 88
+time 4/4
+
+// bars 1-4
+V1: l8 v14 pan 0 @flute 4d#2 d#4. f | f4 f4 f2 | d#2 d#4. f | f4 g#4 d2 |
+V2: l8 v9 pan -3 @arp 4d# g a# g d# g a# g | a# 5d f d 4a# 5d f d | 4g# 5c d# c 4g# 5c d# c | 4a# 5d f d 4a# 5d f d |
+V3: l8 v13 pan 0 @bass 2d#4 g4 d#4 a#4 | a#4 3d4 2a#4 3f4 | 2g#4 3c4 2g#4 3d#4 | 2a#4 3d4 2a#4 3f4 |
+
+// bars 5-8
+V1: g#8. 5d16 r4 d#4 f4 | f4. r f2 | 4d#2 d#4. f | f4 f4 f2 |
+V2: 4d# g a# g d# g a# g | a# 5d f d 4a# 5d f d | 4g# 5c d# c 4g# 5c d# c | 4a# 5d f d 4a# 5d f d |
+V3: 2d#4 g4 d#4 a#4 | a#4 3d4 2a#4 3f4 | 2g#4 3c4 2g#4 3d#4 | 2a#4 3d4 2a#4 3f4 |

@@ -248,7 +248,9 @@ class CommandLineTests(unittest.TestCase):
         import subprocess
         import sys
         root = str(Path(__file__).resolve().parents[2])
-        for name in ("chipsynth.dpcm", "blobs.dpcm"):
+        import importlib.util
+        names = ["chipsynth.dpcm"] + (["blobs.dpcm"] if importlib.util.find_spec("blobs") else [])   # blobs: the game's shim
+        for name in names:
             with tempfile.TemporaryDirectory() as d:
                 out = subprocess.run([sys.executable, "-m", name, "demo", d], cwd=root, capture_output=True, text=True)
                 self.assertEqual(out.returncode, 0, out.stderr)

@@ -1,0 +1,13 @@
+// generated: kind=victory mood=- seed=2 tempo=137 sum=bb20db16
+title Victory 2
+author Blobs generator
+comment victory in major, 137 bpm
+tempo 137
+time 4/4
+once
+
+// bars 1-4
+V1: l8 v14 pan 0 @bright 4g# b 5d# e e f# d# f# | e4 d# g# g# r e4 | 4b4 5e4 g#2 | 4e1 |
+V2: l8 v9 pan -3 @arp 4e g# b g# e g# b g# | a 5c# e c# 4a 5c# e c# | 4b 5d# f# d# 4b 5d# f# d# | 4b1 |
+V3: l8 v13 pan 0 @bass 2e4 e4 e4 b4 | a4 a4 a4 3e4 | 2b4 b4 b4 3f#4 | 2e1 |
+V4: l8 v12 pan 2 @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @crash 6c1 |
