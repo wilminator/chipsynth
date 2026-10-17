@@ -20,7 +20,7 @@ import re
 from . import mml
 from .mml import MMLError, LETTER
 from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Tempo, Loop, Trace, Clip, TRACKS,
-                   SongError)
+                   SongError, Volume, Tweak, Key)
 from .synth import WAVES, Instrument
 from .songmml import length_pieces
 
@@ -39,6 +39,44 @@ FIELDS = {"pw": (1, 99), "a": (0, 15), "d": (0, 15), "s": (0, 15), "r": (0, 15),
 
 
 MAX_PITCH = 8 * 12 + 11
+# per-note effects: name -> (vibrato (rate, depth), arpeggio offsets, slide); the tracker cycles through these
+EFFECTS = {"none": ((0, 0), (), 0), "vibrato": ((5, 3), (), 0), "slide": ((0, 0), (), 12),
+           "arpeggio": ((0, 0), (0, 4, 7), 0), "arpeggio minor": ((0, 0), (0, 3, 7), 0)}
+EFFECT_MARK = {"none": "", "vibrato": "~", "slide": "/", "arpeggio": "^", "arpeggio minor": "^m"}
+
+
+def effect_of(note):
+    """The name in EFFECTS that a compiled note plays with (slide, then arpeggio, then vibrato; else "none")."""
+    i = note.inst
+    if note.slide:
+        return "slide"
+    if i.arp:
+        return "arpeggio minor" if tuple(i.arp) == EFFECTS["arpeggio minor"][1] else "arpeggio"
+    if i.vib_rate and i.vib_depth:
+        return "vibrato"
+    return "none"
+
+
+def _fx_sig(n):
+    return (n.inst.vib_rate, n.inst.vib_depth, tuple(n.inst.arp), n.slide)
+
+
+def _fx_events(have, want):
+    """Tweaks that turn the effect state `have` into `want` (each is (vib rate, vib depth, arp, slide))."""
+    out = []
+    if have[:2] != want[:2]:
+        out.append(Tweak("vib", "%d,%d" % want[:2] if any(want[:2]) else "off"))
+    if have[2] != want[2]:
+        out.append(Tweak("arp", ",".join(str(x) for x in want[2]) if want[2] else "off"))
+    if have[3] != want[3]:
+        out.append(Tweak("slide", str(want[3])))
+    return out
+
+
+def _lead(c, ev):
+    """Where in `c` events that come before the note `ev` go (before the `<` that shifts its octave, if any)."""
+    i = _index(c, ev)
+    return i - 1 if i > 0 and _is_shift(c[i - 1]) else i
 GROW_CAP = 16 * mml.TICKS_WHOLE            # how far past the end a note may be pulled in one go
 
 
@@ -96,6 +134,14 @@ def _unwrap(container, event):
             del container[i - 1]
             return a.shift
     return 0
+
+
+def _walk(items):
+    for e in items:
+        yield e
+        body = getattr(e, "items", None) or getattr(e, "body", None)
+        if isinstance(body, list):
+            yield from _walk(body)
 
 
 def _is_shift(e):
@@ -347,6 +393,141 @@ class Editor:
                 # the first pass changed only pitches, so every other note is still where we noted it
             return None
         return self.change("transpose", run)
+
+    # ---- per-note volume and effects
+    def set_volume(self, voice, index, vol):
+        """Give one note its own volume (0-15).  A `v` is written just before the note and the next note whose volume
+        would have changed is given its old volume back, so only this note differs."""
+        return self.change("note volume", lambda: self._set_volume(voice, index, vol))
+
+    def set_effect(self, voice, index, effect):
+        """Give one note an effect from EFFECTS ("none" turns off whatever the instrument would add)."""
+        if effect not in EFFECTS:
+            raise EditError("no such effect: %s" % effect)
+        return self.change("note effect", lambda: self._set_effect(voice, index, effect))
+
+    def _pin(self, voice, before, sig, fixer, skip):
+        """Insert fixes until every note not in `skip` has the state it had in `before` ({start: state})."""
+        for _ in range(32):
+            bad = None
+            for i, n in enumerate(self.tune.voices[voice]):
+                if n.start in before and sig(n) != before[n.start]:
+                    g = self.group(voice, i)
+                    if id(g[0].event) not in skip:
+                        bad = (g, n)
+                        break
+            if bad is None:
+                return
+            g, n = bad
+            c, ev = g[0].container, g[0].event
+            i = _lead(c, ev)
+            c[i:i] = fixer(n, before[n.start])
+            self.refresh()
+        raise EditError("could not keep the other notes as they were")
+
+    def _target_events(self, voice, index):
+        g = self.group(voice, index)
+        out, seen = [], set()
+        for p in g:
+            if p.kind == "note" and id(p.event) not in seen:
+                seen.add(id(p.event))
+                out.append(p)
+        return g, out, {id(p.event) for p in g}
+
+    def _set_volume(self, voice, index, vol):
+        if not 0 <= vol <= 15:
+            raise EditError("volume is 0 to 15")
+        if self.tune.voices[voice][index].vol == vol:
+            return vol
+        before = {n.start: n.vol for n in self.tune.voices[voice]}
+        g, todo, skip = self._target_events(voice, index)
+        for p in todo:
+            c = p.container
+            i = _lead(c, p.event)
+            if i > 0 and isinstance(c[i - 1], Volume) and c[i - 1].value is not None:
+                c[i - 1].value = vol
+            else:
+                c.insert(i, Volume(value=vol))
+        self.refresh()
+        self._pin(voice, before, lambda n: n.vol, lambda n, want: [Volume(value=want)], skip)
+        return vol
+
+    def _set_effect(self, voice, index, effect):
+        vib, arp, slide = EFFECTS[effect]
+        want = (vib[0], vib[1], arp, slide)
+        if _fx_sig(self.tune.voices[voice][index]) == want:
+            return effect
+        before = {n.start: _fx_sig(n) for n in self.tune.voices[voice]}
+        have = before[self.tune.voices[voice][index].start]
+        g, todo, skip = self._target_events(voice, index)
+        for p in todo:
+            c = p.container
+            i = _lead(c, p.event)
+            new = _fx_events(have, want)
+            words = {t.word for t in new}
+            while i > 0 and isinstance(c[i - 1], Tweak) and c[i - 1].word in words:       # replace our own earlier ones
+                del c[i - 1]
+                i -= 1
+            c[i:i] = new
+        self.refresh()
+        self._pin(voice, before, _fx_sig, lambda n, w: _fx_events(_fx_sig(n), w), skip)
+        return effect
+
+    # ---- the key
+    def transpose_in_key(self, notes, steps, tonic, scale):
+        """Move `notes` ([(voice, index)]) by `steps` degrees of the key `tonic` (0-11) `scale` (a name in mml.SCALES);
+        a note outside the scale keeps its distance above the degree below it.  All or nothing."""
+        steps_of = mml.SCALES.get(scale)
+        if steps_of is None:
+            raise EditError("no such scale: %s" % scale)
+        n = len(steps_of)
+
+        def move(p):
+            octv, pc = divmod(p - tonic, 12)
+            d = max(k for k in range(n) if steps_of[k] <= pc)
+            k = d + steps
+            return tonic + 12 * (octv + k // n) + steps_of[k % n] + (pc - steps_of[d])
+
+        def run():
+            todo = [(v, self.tune.voices[v][i].start, move(self.tune.voices[v][i].pitch)) for v, i in notes]
+            for v, start, pitch in todo:
+                if not 0 <= pitch <= MAX_PITCH:
+                    raise EditError("transposed out of range")
+            for v, start, pitch in todo:
+                self._set_pitch(v, self.find(v, start), pitch)
+        return self.change("transpose in key", run)
+
+    def key_events(self):
+        """Every `key` (not `key off`) event in the song's tracks and clips."""
+        lists = list(self.song.tracks.values()) + [c.items for c in self.song.clips.values()]
+        return [e for items in lists for e in _walk(items) if isinstance(e, Key) and e.tonic is not None]
+
+    def set_key(self, tonic, scale, keep_pitch=True):
+        """Change the song's `key` lines to `tonic` `scale`.  The notes are written as degrees of the key, so with
+        keep_pitch they are re-spelled to sound exactly as before; without it they move with the key (a modulation).
+        Returns how many key lines changed (0: the song writes letter notes, nothing to do)."""
+        if scale not in mml.SCALES and scale not in self.song.keys:
+            raise EditError("no such scale: %s" % scale)
+
+        def run():
+            keys = self.key_events()
+            if not keys:
+                return 0
+            before = [[(n.start, n.pitch) for n in v] for v in self.tune.voices]
+            for k in keys:
+                k.tonic, k.scale = tonic % 12, scale
+            self.refresh()
+            if keep_pitch:
+                for v in range(4):
+                    for start, pitch in before[v]:
+                        i = self.find(v, start)
+                        if i is not None and self.tune.voices[v][i].pitch != pitch:
+                            self._set_pitch(v, i, pitch)
+                for v in range(4):
+                    if [(n.start, n.pitch) for n in self.tune.voices[v]] != before[v]:
+                        raise EditError("some notes cannot be kept at their pitch in that key")
+            return len(keys)
+        return self.change("change key", run)
 
     # ---- instruments
     def instrument_names(self):
