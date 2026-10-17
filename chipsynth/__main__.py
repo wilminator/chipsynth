@@ -7,6 +7,14 @@
   import PKG.csp FILE.mml ...     add songs (song id = file name) to a package, creating it if needed
                                   (FILE.mid works too: the first four parts with notes)
   export PKG.csp [-d DIR] [--midi]  write every song as MML (or as .mid files)
+  generate KIND [options]         a generated tune as MML (stdout, or -o FILE.mml):
+                                    --seed N  --mood calm|tense|bright|dark  --tempo BPM
+                                    --dac         drums as samples on D1 / D2          (kick, snare, hats, crash, toms)
+                                    --dac-bass    the bass as pitched samples on D2
+                                    --voice       a rare one-shot "hey" on D1 (boss intro, turnarounds)
+                                    --samples DIR also write the kit's .dpcm files the tune uses into DIR
+                                                  (a game's music/samples; the built-in kit needs no files)
+                                    --wav FILE    also render the tune to a WAV
 """
 import sys
 from pathlib import Path
@@ -23,6 +31,46 @@ def opt(args, flag):
         del args[i:i + 2]
         return val
     return None
+
+
+def generate_cmd(args):
+    from . import kit, musicgen
+    out, samples, wav = opt(args, "-o"), opt(args, "--samples"), opt(args, "--wav")
+    seed, mood, tempo = opt(args, "--seed"), opt(args, "--mood"), opt(args, "--tempo")
+    flags = {f: f in args for f in ("--dac", "--dac-bass", "--voice")}
+    args = [a for a in args if a not in flags]
+    if len(args) != 1 or args[0] not in musicgen.KINDS or (mood or "") not in musicgen.MOODS:
+        print("generate KIND [--seed N] [--mood M] [--tempo BPM] [--dac] [--dac-bass] [--voice] [-o FILE] [--samples DIR] "
+              "[--wav FILE]\n  kinds: %s\n  moods: %s" % (", ".join(musicgen.KINDS), ", ".join(m for m in musicgen.MOODS if m)),
+              file=sys.stderr)
+        return 2
+    try:
+        seed, tempo = int(seed or 1), (int(tempo) if tempo else None)
+    except ValueError:
+        print("error: --seed and --tempo are numbers", file=sys.stderr)
+        return 2
+    text = musicgen.generate(args[0], seed, mood or "", tempo, dac=flags["--dac"], dac_bass=flags["--dac-bass"],
+                             voice=flags["--voice"])
+    if out:
+        Path(out).write_text(text, encoding="utf-8", newline="\n")
+        print("wrote", out)
+    else:
+        sys.stdout.write(text)
+    if samples:
+        names = sorted({n for n in kit_names(text)})
+        for p in kit.write_files(samples, names):
+            print("wrote", p, file=sys.stderr if not out else sys.stdout)
+    if wav:
+        from .player import render_wav
+        render_wav(mml.parse(text), wav)
+        print("wrote", wav, file=sys.stderr if not out else sys.stdout)
+    return 0
+
+
+def kit_names(text):
+    """The kit sample names a tune's [sample] section declares."""
+    import re
+    return re.findall(r"^(kit_[A-Za-z_]+) = ", text, re.M)
 
 
 def main(argv):
@@ -77,6 +125,8 @@ def main(argv):
                 else:
                     (d / (sid + ".mml")).write_text(song.to_mml(), encoding="utf-8", newline="\n")
                     print("wrote", d / (sid + ".mml"))
+        elif cmd == "generate":
+            return generate_cmd(args)
         else:
             print(__doc__)
             return 2

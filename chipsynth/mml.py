@@ -321,6 +321,9 @@ class _Parser:
                     smp = dpcm.load(path)
                 except dpcm.DpcmError:
                     smp = None
+        if smp is None and re.fullmatch(r"kit_[A-Za-z_]+", file):
+            from . import kit                             # the generator's built-in drums, bass and voice
+            smp = kit.builtin(file)
         if smp is not None and rate is not None:
             smp = replace(smp, rate=rate)
         self._samples[name] = smp
