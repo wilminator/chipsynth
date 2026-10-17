@@ -65,8 +65,22 @@ In Python: `dpcm.convert_wav(x, wav_rate, dpcm.ImportOptions(...))` returns `(Sa
 the size, seconds, rate, parts and any error without writing. The maker's Sample import settings screen has the same
 options and shows that preview live.
 
+## The song composer (optional, needs pygame)
+
+`chipsynth/composer/` is a resizable piano-roll / tracker window for writing songs. It is an optional extra: the rest of
+the library never imports it, and it is the only part that imports pygame at the top of a module (install `pygame`
+yourself). It imports nothing from the Blobs game.
+
+    python -m chipsynth.composer [GAMEDIR] [SONG] [--nosound] [--reset]
+
+`python -m chipsynth.compose` is the same command. GAMEDIR is a folder with a `music/` folder (loose `.mml` files, `.csp`
+packages, `music/lib`); SONG is a song id like `forest:dawn` or a `.mml` / `.csp` path. With no arguments it opens a
+generated tune.
+
 ## Tests
 
     python -m unittest discover -t . -s chipsynth/tests      (from the project root)
 
-`tests/test_boundary.py` fails if the library ever imports the game or anything beyond numpy and scipy.
+`tests/test_boundary.py` fails if the library ever imports the game or anything beyond numpy and scipy (pygame is allowed
+only lazily in `output.py` and in `composer/`). The suite needs nothing outside this directory (test data is in
+`tests/data/`), so it also runs from a standalone checkout of chipsynth.

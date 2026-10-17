@@ -17,12 +17,13 @@ from chipsynth.song import Song
 from chipsynth.tests.test_song import FEATURES, norm, bare, lib as any_lib
 
 ROOT = Path(__file__).resolve().parents[2]
+DATA = Path(__file__).resolve().parent / "data"
 TUNE = "tempo 120\ntitle Hello\nV1: l8 c d e f g a b >c\n"
 
 
 def demo_package():
     pkg = pk.Package(name="demo", author="Mike", comment="all the demos")
-    for f in sorted(glob.glob(str(ROOT / "demo_songs" / "*.mml"))):
+    for f in sorted(glob.glob(str(DATA / "demo_songs" / "*.mml"))):
         pkg.add_song(Path(f).stem, Song.from_mml(Path(f).read_text()))
     return pkg
 
@@ -46,7 +47,7 @@ class CodecTests(unittest.TestCase):
     def test_every_demo_song_plays_the_same_from_the_package(self):
         pkg = pk.loads(pk.dumps(demo_package()))
         for sid in pkg.songs:
-            t0 = mml.parse((ROOT / "demo_songs" / (sid + ".mml")).read_text())
+            t0 = mml.parse((DATA / "demo_songs" / (sid + ".mml")).read_text())
             t1 = pkg.tune(sid)
             self.assertEqual(dataclasses.replace(t0, warnings=[], instruments={}),
                              dataclasses.replace(t1, warnings=[], instruments={}), sid)

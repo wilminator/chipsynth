@@ -14,6 +14,7 @@ from chipsynth.song import (Song, Clip, SongError, Note, Rest, Repeat, Call, Com
 from chipsynth.songmml import length_pieces, instrument_text
 
 ROOT = Path(__file__).resolve().parents[2]
+DATA = Path(__file__).resolve().parent / "data"
 
 
 class _AnySamples(dict):
@@ -220,7 +221,7 @@ class LengthTests(unittest.TestCase):
 
 class ExampleTunes(Corpus):
     def test_demo_songs(self):
-        files = sorted(glob.glob(str(ROOT / "demo_songs" / "*.mml")))
+        files = sorted(glob.glob(str(DATA / "demo_songs" / "*.mml")))
         self.assertTrue(files)
         for f in files:
             self.check(Path(f).read_text(), None, f)

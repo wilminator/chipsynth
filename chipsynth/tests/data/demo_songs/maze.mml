@@ -1,0 +1,18 @@
+// generated: kind=maze mood=dark seed=5 tempo=78 sum=cbce4e58
+title Maze 5 (dark)
+author Blobs generator
+comment maze in minor, 78 bpm
+tempo 78
+time 4/4
+
+// bars 1-4
+V1: l8 v14 pan 0 @buzz 3c#1 | d# f# g#4 f#4 e4 | c#1 | d# f# g#4 b4 g#4 |
+V2: l8 v9 pan -3 r2 @bell 4c#4 r4 | 5e4 r4 4b4 r4 | r2 5d#4 r4 | e4 r4 e4 r4 |
+V3: l8 v13 pan 0 @pad 2c#2 c#2 | b2 b2 | a2 a2 | b2 b2 |
+V4: l8 v12 pan 2 @kick 2c r2 r @hat 7c r | r2. c r | @kick 2c r2 r @hat 7c r | r2. c r |
+
+// bars 5-8
+V1: c#2. c#4 | d#2 d#4 2b4 | 3c#1 | d# f# g#4 f#4 e4 |
+V2: r2 r2 | 4e4 r4 e4 r4 | f#4 r4 f#4 r4 | b4 r4 r2 |
+V3: c#2 c#2 | b2 b2 | a2 a2 | b2 b2 |
+V4: @kick 2c r2 r @hat 7c r | r2. c r | @kick 2c r2 r @hat 7c r | r2. c r |

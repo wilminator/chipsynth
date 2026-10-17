@@ -1,0 +1,30 @@
+// generated: kind=title mood=- seed=7 tempo=99 sum=a6344be6
+title Title 7
+author Blobs generator
+comment title in minor, 99 bpm
+tempo 99
+time 4/4
+
+// bars 1-4
+V1: l8 v14 pan 0 @lead 5c#2 c#4 c# d | d4 r4 d g# a4 | c#2 c#4 c# d | c#4 r4 d b b4 |
+V2: l8 v9 pan -3 @organ 4f# a 5c# 4a f# a 5c# 4a | b 5d f# d 4b 5d f# d | c# e g# e c# e g# e | 4f# a 5c# 4a f# a 5c# 4a |
+V3: l8 v13 pan 0 @bass 2f#4 f#4 f#4 3c#4 | 2b4 b4 b4 3f#4 | c#4 c#4 c#4 g#4 | 2f#4 f#4 f#4 3c#4 |
+V4: l8 v12 pan 2 @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r |
+
+// bars 5-8
+V1: c#2. r4 | d4. d d2 | c#2 c#4 c# d | c#4 r4 d g# a4 |
+V2: f# a 5c# 4a f# a 5c# 4a | b 5d f# d 4b 5d f# d | c# e g# e c# e g# e | 4f# a 5c# 4a f# a 5c# 4a |
+V3: 2f#4 f#4 f#4 3c#4 | 2b4 b4 b4 3f#4 | c#4 c#4 c#4 g#4 | 2f#4 f#4 f#4 3c#4 |
+V4: @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r |
+
+// bars 9-12
+V1: 4a8. f#16 a 5c# c#8. e16 d4 | d4 e4 f#2 | 4a8. f#16 a 5c# c#8. e16 d4 | c#4 f#4 f#2 |
+V2: f# a 5c# 4a f# a 5c# 4a | b 5d f# d 4b 5d f# d | c# e g# e c# e g# e | 4f# a 5c# 4a f# a 5c# 4a |
+V3: 2f#4 f#4 f#4 3c#4 | 2b4 b4 b4 3f#4 | c#4 c#4 c#4 g#4 | 2f#4 f#4 f#4 3c#4 |
+V4: @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r |
+
+// bars 13-16
+V1: c#1 | d4 4a4. g# f#4 | 5c#2 c#4 c# d | c#4 r4 d g# a4 |
+V2: f# a 5c# 4a f# a 5c# 4a | b 5d f# d 4b 5d f# d | c# e g# e c# e g# e | 4f# a 5c# 4a f# a 5c# 4a |
+V3: 2f#4 f#4 f#4 3c#4 | 2b4 b4 b4 3f#4 | c#4 c#4 c#4 g#4 | 2f#4 f#4 f#4 3c#4 |
+V4: @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r | @kick 2c r @hat 7c r @kick 2c r @snare 5g r |
