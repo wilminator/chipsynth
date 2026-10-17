@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chipsynth"
+version = "0.1.0"
+description = "A small chip-style synthesizer, an MML tune language, a seeded song generator and a visual song composer."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Michael Allen Wilmes" }]
+dependencies = ["numpy>=1.26", "scipy>=1.11"]
+
+[project.optional-dependencies]
+play = ["pygame>=2.5"]          # live sound output
+composer = ["pygame>=2.5"]      # the song composer window (python -m chipsynth.composer)
+
+[tool.setuptools.packages.find]
+include = ["chipsynth*"]
+
+[tool.setuptools.package-data]
+chipsynth = ["tests/data/*"]

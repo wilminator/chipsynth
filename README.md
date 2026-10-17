@@ -84,3 +84,7 @@ generated tune.
 `tests/test_boundary.py` fails if the library ever imports the game or anything beyond numpy and scipy (pygame is allowed
 only lazily in `output.py` and in `composer/`). The suite needs nothing outside this directory (test data is in
 `tests/data/`), so it also runs from a standalone checkout of chipsynth.
+
+## Licence
+
+Copyright (C) 2026 Michael Allen Wilmes. The licence has not been chosen yet; until a LICENSE file is added, all rights are reserved.
