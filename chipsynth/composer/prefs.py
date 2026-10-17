@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The composer's remembered settings (theme, font size, scales, panel sizes, window size, last song)."""
 import json
 import os

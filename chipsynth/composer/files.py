@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """File helpers the composer needs: a game folder's music layout and saving with a backup (no dependency on the game)."""
 import shutil
 import time

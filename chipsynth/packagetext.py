@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """A package as text, for diffs and debugging (`python -m chipsynth dump` / `build`).
 
     #! package          name: forest / author: ... / comment: ... / created: ... / modified: ...

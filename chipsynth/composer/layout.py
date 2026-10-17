@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Where things go in the window.  Panel sizes are the user's (dragged splitters); the rest follows the window and
 the font size.  No pygame: rectangles are (x, y, w, h) tuples."""
 from dataclasses import dataclass

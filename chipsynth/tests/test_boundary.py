@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """chipsynth must stay a library: it never imports the game (blobs), and pygame only inside output.py (lazily) and the composer/ subpackage."""
 import ast
 import sys

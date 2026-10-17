@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The shared effect bus of the chiptune mixer: an echo and a reverb (see DESIGN-MUSIC.md).
 
 Every voice has a `send` level; the sends of all voices are summed (stereo, already panned) and run through the

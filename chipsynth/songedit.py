@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Editing a Song note by note, with undo and redo (what the composer's piano roll drives).
 
     ed = Editor(song, lib)

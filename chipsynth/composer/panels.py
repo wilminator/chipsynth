@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Everything the composer draws.  `draw(app)` paints one frame; the geometry it uses comes from layout.py."""
 import math
 

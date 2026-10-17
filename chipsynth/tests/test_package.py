@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The package file, PackageSet and the dump / build text (PLAN-CHIPSYNTH.md, C0b)."""
 import dataclasses
 import glob

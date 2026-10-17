@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Themes, fonts and the small immediate-mode widget kit the composer draws with."""
 import pygame
 

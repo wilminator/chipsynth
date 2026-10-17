@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The composer window, headless (SDL dummy driver): the model maths, the layout, and the window's behaviour."""
 import os
 import random

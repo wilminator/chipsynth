@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Standard MIDI file export and import (PLAN-CHIPSYNTH.md, C7)."""
 import struct
 import tempfile

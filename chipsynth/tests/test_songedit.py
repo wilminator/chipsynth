@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Note editing on a Song, with undo/redo (PLAN-CHIPSYNTH.md, C2)."""
 import random
 import unittest

@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """python -m chipsynth COMMAND ...   (packages: see package.py)
 
   list PATH...                    the songs in packages / folders / .mml files: id, title, seconds

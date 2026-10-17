@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The package file (*.csp, "chipsynth package"): several songs and what they share, in one binary file.
 
     pkg = Package(name="forest")

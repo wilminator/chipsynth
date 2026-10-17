@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """WAV import options (dpcm.ImportOptions, prepare, convert_wav, preview and the command line)."""
 import contextlib
 import io

@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The tracker view's maths, with no pygame in it: which text goes in which cell, and the keyboard piano.
 
 A tracker shows time going down the page: one row per `rt` ticks (the snap length), one column per voice

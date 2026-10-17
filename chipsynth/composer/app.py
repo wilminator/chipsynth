@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The composer window: state, events and playback.  Drawing is in panels.py; the maths in model.py / layout.py."""
 import dataclasses
 import random

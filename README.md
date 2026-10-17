@@ -87,4 +87,8 @@ only lazily in `output.py` and in `composer/`). The suite needs nothing outside 
 
 ## Licence
 
-Copyright (C) 2026 Michael Allen Wilmes. The licence has not been chosen yet; until a LICENSE file is added, all rights are reserved.
+Copyright (C) 2026 Michael Allen Wilmes.
+
+chipsynth is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file `LICENSE` for the full text.
+
+Under the GPL, a program that includes or links chipsynth (the Free Software Foundation reads linking that way) must be released under the GPL too. Music you make with it is yours; the licence covers the code, not the songs it renders.

@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The song generator (see DESIGN-MUSIC.md): a context kind, a seed and an optional mood become a
 finished tune in MML text, so a generated song is an ordinary tune file the maker can save and edit.
 

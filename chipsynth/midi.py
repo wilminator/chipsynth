@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Standard MIDI files in and out (format 0 / 1 read, format 1 written).
 
     data = to_midi(tune)               # a Tune -> .mid bytes: a tempo track, then one track per voice that has notes

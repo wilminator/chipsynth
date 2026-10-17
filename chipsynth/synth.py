@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The chiptune mixer core (see DESIGN-MUSIC.md): 4 voices and 2 DACs rendered to stereo.
 
 Voices: five waveforms (pulse with a width, sawtooth, triangle, sine, noise), a volume, an ADSR envelope

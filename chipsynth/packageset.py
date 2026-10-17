@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Any number of packages at once, and a way to pick a song from them (PLAN-CHIPSYNTH.md, Part C).
 
     pkgs = PackageSet(lib)                    # lib: the game's library (music/lib), or None for the built-in one

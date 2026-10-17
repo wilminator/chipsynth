@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The Song model: what the composer edits and the package format stores (PLAN-CHIPSYNTH.md, Part B).
 
 MML is only an import / export format (`chipsynth.songmml`).  A `Song` keeps the structure a person wrote:

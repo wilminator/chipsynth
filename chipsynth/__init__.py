@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """chipsynth: a small chip-style synthesizer, a tune language (MML) and a player.
 
     from chipsynth import parse, TunePlayer, render_wav

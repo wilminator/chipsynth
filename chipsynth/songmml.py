@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """MML text <-> Song (see song.py).  `from_mml` keeps patterns, repeats and loops as real objects and own-line
 comments as notes; `to_mml` writes them back as `[pat]`, `!name` and `[..]n`.  Round trip: for any MML that parses,
 `from_mml(text).compile()` equals `parse(text)`, and `from_mml(to_mml(song))` gives the same song again."""

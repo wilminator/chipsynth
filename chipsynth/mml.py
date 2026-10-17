@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The tune language (see DESIGN-MUSIC.md): text MML -> a `Tune` of notes per voice.
 
 This is the core subset: header (title, author, comment, tempo, time, tune, once), [instr] and [pat]

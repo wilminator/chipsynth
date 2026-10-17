@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """What the composer window shows, with no pygame in it (so it is tested without a display).
 
     roll = Roll.from_tune(tune, names)       # notes per voice, DAC blocks, pitch range

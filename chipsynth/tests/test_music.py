@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 import os, sys, tempfile, time, unittest, wave
 from pathlib import Path
 os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')

@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Plays a Tune (see mml.py) through the mixer core (synth.py).  Needs no audio device: it renders samples.
 
     p = TunePlayer(tune)            # loops from the loop marker; tune.once plays a single time

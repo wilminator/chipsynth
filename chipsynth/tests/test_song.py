@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The Song model: MML -> Song -> Tune and Song -> MML round trips (PLAN-CHIPSYNTH.md, C0)."""
 import ast
 import dataclasses

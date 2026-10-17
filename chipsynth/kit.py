@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The built-in DAC kit of the song generator (see DESIGN-MUSIC.md): a few samples made from numpy maths, encoded with
 the library's own DPCM encoder, so a generated song that plays drums, a pitched bass or a shout on the DAC lanes needs no
 extra files.

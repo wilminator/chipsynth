@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """DAC samples (see DESIGN-MUSIC.md): WAV -> NES-style 1-bit delta samples, and the .dpcm files they are kept in.
 
 A Sample is a name plus a DPCM rate (0-15, the NES table in synth.DPCM_RATES) and one or two tracks (mono, or the left

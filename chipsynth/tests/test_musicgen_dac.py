@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The generator's DAC options (drums, bass, voice accent) and the built-in kit behind them."""
 import contextlib
 import io

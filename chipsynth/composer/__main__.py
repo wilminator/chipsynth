@@ -1,4 +1,5 @@
 # Copyright (C) 2026 Michael Allen Wilmes
+# SPDX-License-Identifier: GPL-3.0-or-later
 """python -m chipsynth.composer [GAMEDIR] [SONG] [--nosound] [--reset]
 
 The song composer.  GAMEDIR's music folder is loaded (its .csp packages and loose .mml files) and SONG, if given, opens:
