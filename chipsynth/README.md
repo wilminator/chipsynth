@@ -42,6 +42,29 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 The tune language is described in `DESIGN-MUSIC.md` (project root) and, shorter, on the Music editor's help pages.
 Rendering is exact: the same samples come out however the output is cut into blocks.
 
+## WAV import options (`dpcm.py`)
+
+`python -m chipsynth.dpcm convert IN.wav GAMEDIR` with no options writes exactly what it always did (rate 12, stereo mixed to
+mono, normalized to 0.98). Options, applied in this order (channel, trim, cut to length, fade, then resample and normalize):
+
+| option | does |
+|---|---|
+| `--rate N` or `--rate auto` | DPCM rate index 0-15 (the NES table); `auto` picks the highest rate whose result fits the size cap |
+| `--channel mix\|left\|right\|stereo` | mono mixdown, one channel, or two tracks for D1 + D2 (`--stereo` is the same as `--channel stereo`) |
+| `--no-normalize` | keep the WAV's own level instead of scaling the peak to 0.98 |
+| `--trim [DB]` | cut leading and trailing silence below DB dBFS (default -48) |
+| `--fade MS` | linear fade-out over the last MS milliseconds |
+| `--max-seconds S`, `--max-bytes N` | cut the recording to S seconds, or the result to N bytes per track |
+| `--truncate` | a result over the DPCM size cap (64 parts of 4081 bytes) is cut to fit instead of refused |
+| `--fit` | turn the level down until it follows cleanly (cleaner, quieter) |
+| `--preview` | print the size, duration, chosen rate and parts, and write nothing |
+
+    python -m chipsynth.dpcm convert in.wav GAMEDIR --rate auto --channel left --trim --fade 50 --preview
+
+In Python: `dpcm.convert_wav(x, wav_rate, dpcm.ImportOptions(...))` returns `(Sample, notes)`, and `dpcm.preview(...)` returns
+the size, seconds, rate, parts and any error without writing. The maker's Sample import settings screen has the same
+options and shows that preview live.
+
 ## Tests
 
     python -m unittest discover -t . -s chipsynth/tests      (from the project root)

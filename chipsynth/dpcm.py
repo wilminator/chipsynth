@@ -146,6 +146,155 @@ def convert(x, src_rate, rate=15, name="", stereo=False, normalise=True, fit=Fal
     return s
 
 
+@dataclass
+class ImportOptions:
+    """WAV import options.  The defaults reproduce plain convert() output byte for byte.
+
+    rate        DPCM rate index 0-15 (synth.DPCM_RATES), or None / "auto" for the highest rate whose result fits the
+                size cap (MAX_PARTS parts per track, and max_bytes when set)
+    channel     "mix" (average the channels), "left", "right", or "stereo" (two tracks, D1 + D2)
+    normalize   scale the peak to 0.98 (the default); False keeps the WAV's own level
+    trim_db     cut leading and trailing silence below this level (dBFS, e.g. -48); None keeps it
+    fade_ms     linear fade-out over the last this-many milliseconds; 0 for none
+    max_seconds cut the recording to at most this long (WAV time); None for no limit
+    max_bytes   cut the result to at most this many bytes per track; None for no limit
+    truncate    when the result still exceeds the DPCM size cap, cut it to fit instead of failing
+    fit         the convert() loudness fit (cleaner, quieter)
+    """
+    rate: object = 12
+    channel: str = "mix"
+    normalize: bool = True
+    trim_db: object = None
+    fade_ms: float = 0.0
+    max_seconds: object = None
+    max_bytes: object = None
+    truncate: bool = False
+    fit: bool = False
+
+
+CHANNELS = ("mix", "left", "right", "stereo")
+
+
+def trim_silence(x, db=-48.0):
+    """x (n, channels) without the leading and trailing frames quieter than db dBFS (at least one frame is kept)."""
+    if not len(x):
+        return x
+    loud = np.nonzero(np.abs(x).max(axis=1) > 10.0 ** (db / 20.0))[0]
+    if not len(loud):
+        return x[:1]
+    return x[loud[0]:loud[-1] + 1]
+
+
+def fade_out(x, src_rate, ms):
+    """x (n, channels) with a linear fade to silence over its last ms milliseconds."""
+    k = min(len(x), int(round(src_rate * ms / 1000.0)))
+    if k <= 0:
+        return x
+    x = np.array(x, dtype=np.float64)
+    x[-k:] *= np.linspace(1.0, 0.0, k, endpoint=False).reshape(-1, 1) if x.ndim > 1 else np.linspace(1.0, 0.0, k, endpoint=False)
+    return x
+
+
+def size_limit(rate, max_bytes=None):
+    """Most bytes per track a sample at this DPCM rate index may hold (the part cap, MAX_BYTES, and max_bytes)."""
+    lim = min(MAX_PARTS * MAX_PART, MAX_BYTES)
+    return min(lim, max_bytes) if max_bytes else lim
+
+
+def auto_rate(seconds, max_bytes=None):
+    """The highest DPCM rate index at which `seconds` of audio fits the size cap (0 when none does)."""
+    for r in range(15, -1, -1):
+        if int(seconds * DPCM_RATES[r] / 8) + 1 <= size_limit(r, max_bytes):
+            return r
+    return 0
+
+
+def prepare(x, src_rate, opts=None):
+    """Applies the import options that work on the WAV itself.  Returns (x, rate, stereo, notes): x is (n, 1) or
+    (n, 2) floats ready for convert(); notes lists what was done, for the preview."""
+    o = opts or ImportOptions()
+    if o.channel not in CHANNELS:
+        raise DpcmError("channel is one of %s" % ", ".join(CHANNELS))
+    x = np.asarray(x, dtype=np.float64)
+    if x.ndim == 1:
+        x = x.reshape(-1, 1)
+    notes = []
+    stereo = False
+    if x.shape[1] > 1:
+        if o.channel == "left":
+            x = x[:, :1]
+        elif o.channel == "right":
+            x = x[:, 1:2]
+        elif o.channel == "stereo":
+            stereo = True
+        else:
+            x = x.mean(axis=1, keepdims=True)
+    n0 = len(x)
+    if o.trim_db is not None:
+        x = trim_silence(x, o.trim_db)
+        if len(x) != n0:
+            notes.append("trimmed %.3f s of silence" % ((n0 - len(x)) / src_rate))
+    if o.max_seconds is not None:
+        k = max(1, int(o.max_seconds * src_rate))
+        if len(x) > k:
+            x = x[:k]
+            notes.append("cut to %.3f s" % (k / src_rate))
+    rate = o.rate
+    if rate is None or rate == "auto":
+        rate = auto_rate(len(x) / src_rate, o.max_bytes)
+        notes.append("auto rate %d" % rate)
+    rate = int(rate)
+    if not 0 <= rate <= 15:
+        raise DpcmError("rate is 0 to 15")
+    cap = None
+    if o.max_bytes:
+        cap = o.max_bytes
+    if o.truncate:
+        cap = size_limit(rate, cap)
+    if cap:
+        k = max(1, int(cap * 8 / DPCM_RATES[rate] * src_rate))
+        if len(x) > k:
+            x = x[:k]
+            notes.append("cut to %d bytes" % cap)
+    if o.fade_ms > 0:
+        x = fade_out(x, src_rate, o.fade_ms)
+        notes.append("%g ms fade-out" % o.fade_ms)
+    return x, rate, stereo, notes
+
+
+def convert_wav(x, src_rate, opts=None, name=""):
+    """Float samples -> (Sample, notes) under ImportOptions.  Same as convert() with the default options."""
+    o = opts or ImportOptions()
+    x, rate, stereo, notes = prepare(x, src_rate, o)
+    s = convert(x, src_rate, rate, name, stereo, normalise=o.normalize, fit=o.fit,
+                max_bytes=size_limit(rate, o.max_bytes))
+    return s, notes
+
+
+def preview(x, src_rate, opts=None, name=""):
+    """What an import would write, without writing: a dict with size, seconds, rate, hz, parts, tracks, notes and
+    error (None, or why it can't be made).  Size and duration are exact (the conversion is run)."""
+    try:
+        s, notes = convert_wav(x, src_rate, opts, name)
+    except DpcmError as e:
+        return {"error": str(e), "size": 0, "seconds": 0.0, "rate": None, "hz": None, "parts": 0, "tracks": 0,
+                "notes": [], "sample": None}
+    return {"error": None, "size": s.size, "seconds": s.seconds, "rate": s.rate, "hz": DPCM_RATES[s.rate],
+            "parts": len(s.tracks[0]), "tracks": len(s.tracks), "notes": notes, "sample": s}
+
+
+def format_preview(info, wav_rate=None, wav_seconds=None):
+    """One or two lines of text for a preview() result."""
+    if info["error"]:
+        return "cannot import: %s" % info["error"]
+    head = "%d bytes, %.2f s, rate %d (%d Hz), %d part(s)%s" % (
+        info["size"], info["seconds"], info["rate"], info["hz"], info["parts"],
+        ", 2 tracks" if info["tracks"] > 1 else "")
+    if wav_rate and wav_seconds is not None:
+        head = "%d Hz %.2f s WAV -> " % (wav_rate, wav_seconds) + head
+    return head + ("; " + ", ".join(info["notes"]) if info["notes"] else "")
+
+
 def decode_preview(sample, track=0):
     """The sample as float -1..1 at its DPCM rate (for a preview or a test)."""
     from .synth import dpcm_decode
@@ -242,9 +391,18 @@ def main(argv=None):
     c.add_argument("wav")
     c.add_argument("gamedir")
     c.add_argument("--name")
-    c.add_argument("--rate", type=int, default=12)
-    c.add_argument("--stereo", action="store_true", help="keep left and right as two tracks")
+    c.add_argument("--rate", default="12", help="DPCM rate 0-15 (default 12), or auto for the highest that fits")
+    c.add_argument("--stereo", action="store_true", help="keep left and right as two tracks (same as --channel stereo)")
+    c.add_argument("--channel", choices=CHANNELS, help="mix (default), left, right or stereo")
+    c.add_argument("--no-normalize", action="store_true", help="keep the WAV's own level")
+    c.add_argument("--trim", type=float, nargs="?", const=-48.0, metavar="DB",
+                   help="trim leading/trailing silence below DB dBFS (default -48)")
+    c.add_argument("--fade", type=float, default=0.0, metavar="MS", help="fade-out over the last MS milliseconds")
+    c.add_argument("--max-seconds", type=float, metavar="S", help="cut the recording to S seconds")
+    c.add_argument("--max-bytes", type=int, metavar="N", help="cut the result to N bytes per track")
+    c.add_argument("--truncate", action="store_true", help="cut a too-long result to the DPCM size cap, not fail")
     c.add_argument("--fit", action="store_true", help="turn it down until it follows cleanly")
+    c.add_argument("--preview", action="store_true", help="show size, duration and rate; write nothing")
     a = ap.parse_args(argv)
     root = Path(a.gamedir)
     if a.cmd == "demo":
@@ -253,7 +411,18 @@ def main(argv=None):
         return 0
     rate, x = read_wav(a.wav)
     name = a.name or "".join(ch for ch in Path(a.wav).stem if ch.isalpha() or ch == "_") or "sample"
-    s = convert(x, rate, a.rate, name, a.stereo, fit=a.fit)
+    try:
+        r = "auto" if a.rate == "auto" else int(a.rate)
+    except ValueError:
+        raise DpcmError("rate is 0 to 15, or auto")
+    opts = ImportOptions(rate=r, channel=a.channel or ("stereo" if a.stereo else "mix"), normalize=not a.no_normalize,
+                         trim_db=a.trim, fade_ms=a.fade, max_seconds=a.max_seconds, max_bytes=a.max_bytes,
+                         truncate=a.truncate, fit=a.fit)
+    if a.preview:
+        info = preview(x, rate, opts, name)
+        print(format_preview(info, rate, len(x) / rate))
+        return 1 if info["error"] else 0
+    s, _ = convert_wav(x, rate, opts, name)
     save(root / "music" / "samples" / (name + ".dpcm"), s)
     print("music/samples/%s.dpcm: %d bytes, %.1f s, rate %d, %d part(s)" % (name, s.size, s.seconds, s.rate,
                                                                               len(s.tracks[0])))
