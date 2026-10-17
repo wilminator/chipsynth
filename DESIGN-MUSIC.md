@@ -148,7 +148,16 @@ Author: Mike.  Status: design talk in progress.  Built so far: see 'Built' at th
   `[world.0]`, `[maze.3]`, `[town.5]`, plus `[world.default]`, `[maze.default]`, `[town.default]`.
 - **Keys in an entry:** `tune` (an .mml name; omitted = generated), `transition` (`cut` / `fade`), `mood` (calm / tense /
   bright / dark) and `tempo` (BPM) for generated music, `volume` (0-15 trim) and `resume` (true / false: pick the tune up
-  again after a fight).
+  again after a fight). For generated music `dac`, `dac_bass` and `voice` (true / false, all off by default) add the
+  built-in sample kit: drums on D1 / D2 (kick, snare, hats, crash, toms), the bass as pitched samples, and a rare
+  shouted accent. The kit is made in code (`chipsynth/kit.py`), so a game needs no sample files; a `NAME.dpcm` of the same
+  name in `music/samples` replaces a kit sound. On the command line:
+
+  ```
+  python -m chipsynth generate fight --seed 3 --dac --dac-bass --voice -o fight.mml
+  ```
+
+  In the composer, `Ctrl+N` accepts the words `dac`, `dac-bass` and `voice` after the kind, seed and mood.
 - **Lookup order:** the place's own entry, then its kind's `.default`, then the built-in defaults.
 - **Built-in transition defaults:** cut for fight, boss, title, victory, game over; fade for world, maze, town.
 - **Editing:** a Music screen in the maker with pickers (contexts list; tune picker with a "Generated" row; transition, mood,

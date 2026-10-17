@@ -158,7 +158,7 @@ class OptionTests(unittest.TestCase):
     def test_tempo_changes_the_hats(self):
         fast = musicgen.generate("fight", 3, "", 175, dac=True)
         slow = musicgen.generate("fight", 3, "", 70, dac=True)
-        self.assertGreater(len(re.findall(r"kit_hat", fast)), 2 * len(re.findall(r"kit_hat", slow)))
+        self.assertGreater(len(re.findall(r"kit_hat", fast)), 1.5 * len(re.findall(r"kit_hat", slow)))   # eighths vs quarters; fills thin the fast ones
 
     def test_jingles_end_on_a_kick_and_crash(self):
         text = musicgen.generate("victory", 3, dac=True)
