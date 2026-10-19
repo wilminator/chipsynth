@@ -988,7 +988,7 @@ class _Parser:
         t.length = max([v.pos for v in self.voices + self.dvoices] + [0])
         bt = t.bar_ticks
         for v in self.voices:
-            if t.voices[v.index] and v.pos < t.length:
+            if t.voices[v.index] and v.pos < t.length and not t.once:      # a once-only tune never loops
                 self.warn("voice %d is %d ticks shorter than the longest voice, so it goes quiet before the loop"
                           % (v.index + 1, t.length - v.pos))
         t.tempo_events = sorted(self.tempo.items())

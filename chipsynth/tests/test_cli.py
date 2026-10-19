@@ -505,3 +505,10 @@ class ExportSongTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OnceTuneTests(unittest.TestCase):
+    def test_a_once_tune_with_voices_of_unequal_length_gets_no_loop_warning(self):
+        text = "tempo 240\n%sV1: l16 c d e f\nV2: l16 c\n"
+        self.assertEqual(mml.parse(text % "once\n").warnings, [])                  # a sound effect: it never loops
+        self.assertTrue(any("goes quiet before the loop" in w for w in mml.parse(text % "").warnings))
