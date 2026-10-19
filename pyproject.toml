@@ -15,6 +15,7 @@ dependencies = ["numpy>=1.26", "scipy>=1.11"]
 
 [project.optional-dependencies]
 play = ["pygame>=2.5"]          # live sound output
+encode = ["soundfile>=0.12"]    # mp3 and ogg output (python -m chipsynth export-song / sfx)
 composer = ["pygame>=2.5"]      # the song composer window (python -m chipsynth.composer)
 
 [tool.setuptools.packages.find]

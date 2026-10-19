@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Michael Allen Wilmes
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""chipsynth must stay a library: it never imports the game (blobs), and pygame only inside output.py (lazily) and the composer/ subpackage."""
+"""chipsynth must stay a library: it never imports the game (blobs), pygame only inside output.py (lazily) and the composer/
+subpackage, and soundfile (the mp3 / ogg encoder) only inside exporter.py, lazily."""
 import ast
 import sys
 import unittest
@@ -52,6 +53,10 @@ class BoundaryTests(unittest.TestCase):
                     self.assertEqual(p.name, "output.py", "%s imports pygame" % p.name)
                     self.assertTrue(lazy, "output.py must import pygame lazily")
                     continue
+                if mod == "soundfile":
+                    self.assertEqual(p.name, "exporter.py", "%s imports soundfile" % p.name)
+                    self.assertTrue(lazy, "exporter.py must import soundfile lazily (wav needs it not)")
+                    continue
                 self.assertIn(mod, ALLOWED, "%s imports %s" % (p.name, mod))
 
     def test_composer_relative_imports_stay_inside_the_package(self):
@@ -61,8 +66,8 @@ class BoundaryTests(unittest.TestCase):
 
     def test_the_core_loads_without_pygame_or_the_game(self):
         import subprocess
-        code = ("import sys; sys.modules['pygame'] = None; import chipsynth; "
-                "assert 'blobs' not in sys.modules; chipsynth.parse('V1: c')")
+        code = ("import sys; sys.modules['pygame'] = None; sys.modules['soundfile'] = None; import chipsynth; "
+                "from chipsynth import __main__, exporter; assert 'blobs' not in sys.modules; chipsynth.parse('V1: c')")
         subprocess.check_call([sys.executable, "-c", code], cwd=str(PKG.parent))
 
 

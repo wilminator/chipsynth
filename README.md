@@ -90,10 +90,15 @@ and `COMMAND -h` give every option.
 | `import PKG.csp FILE.mml...` | add songs to a package (created if missing). `--id NAME` names the song, `--shared` adds a library file's instruments / fx / scales / samples to the package, `--no-replace` refuses an id already there, `--lib DIR` / `--samples DIR` say where a game's `music/lib` and `.dpcm` files are. `.mid` files work too |
 | `list SOURCE...` | the components of `.csp` / `.mml` / folders: `--type song,sample,...` (aliases `instr`, `key`), `--name 'd*'` (a glob; `TYPE:NAME` for one type) |
 | `export PKG.csp` | components as MML: `-d DIR` (songs as `ID.mml`, the rest in `lib/PACKAGE.mml`, samples in `samples/NAME.dpcm`, which is a game's `music/` layout), or `-o FILE` (`-` for stdout) for one thing; `--type` / `--name` choose; `--midi` writes songs as `.mid`. With no `--type`: songs and the shared parts |
-| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml` or `csp` (from OUT's ending, or `-f`). `render` is the same command |
+| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mp3`, `ogg`, `mid`, `mml` or `csp` (from OUT's ending, or `-f`). `render` is the same command |
+| `sfx SOURCE... -d DIR [-f wav\|mp3\|ogg]` | sound effects: every `.mml` (one cue, named after the file) and every song of a `.csp` in the sources (or folders of them) as a one-shot file, trimmed and normalized. Takes the audio options below; `--no-normalize` and `--trim off` switch those two off, and the tail is 1 s |
 | `generate`, `dump`, `build` | as before |
 
-`export-song` options for a **WAV** (any of them with another format is an error):
+`mp3` and `ogg` are written by the optional [soundfile](https://pypi.org/project/soundfile/) package (`pip install soundfile`, or
+`chipsynth[encode]`), which bundles libsndfile; `wav` needs nothing. A sound effect is an ordinary tune, usually a `once` one
+a fraction of a second long, so it plays live through `TunePlayer` like any other and is rendered to a file for a browser.
+
+`export-song` options for the **audio formats** (any of them with another format is an error):
 
 | option | does |
 |---|---|
@@ -102,6 +107,10 @@ and `COMMAND -h` give every option.
 | `--start T`, `--end T` | keep from `T` to `T`: `1.5`, `250ms`, `1:05.5` or `88200f` (audio frames, 44100 per second). Past the natural end the song keeps looping if `--loops` > 0, else is silent |
 | `--loops N` | trips round the loop after the first pass (nothing for a `once` song, which says so) |
 | `--tail S` | seconds to let the last notes ring (default 2) |
+| `--trim [DB]` | cut the silence at the end: everything after the last sample above `DB` of the peak (default -60) plus 20 ms |
+
+    python -m chipsynth sfx game/sfx -d game/assets/sfx -f mp3
+    python -m chipsynth export-song music/forest.csp:dawn -o dawn.mp3 --loops 1 --normalize
 
     python -m chipsynth import music/forest.csp dawn.mml dusk.mml --lib game/music/lib
     python -m chipsynth list music/forest.csp --type song,sample

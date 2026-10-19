@@ -1,14 +1,15 @@
 # Copyright (C) 2026 Michael Allen Wilmes
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mid, mml or csp.
+"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mp3, ogg, mid, mml or csp.
 
     pkg = open_source("music/forest.csp")
     r = export_song(pkg, "dawn", "dawn.wav", AudioOptions(volume=0.8, normalize=True, start=frames("2s"), loops=1))
 
-Only a WAV is rendered, so only a WAV takes AudioOptions.  What they do, in this order:
+Only the audio formats are rendered, so only they take AudioOptions (mp3 and ogg are written by the optional soundfile
+package, which bundles libsndfile).  What the options do, in this order:
   1. render the first pass, `loops` more trips round the loop (when the song loops) and `tail` seconds to ring out,
      or up to `end` when that is given (past the natural end the song keeps looping if loops > 0, else is silent);
-  2. keep the part from `start` to `end`;
+  2. keep the part from `start` to `end`, then cut the silence at the end when `trim_db` is set (a sound effect);
   3. normalize: scale so the loudest sample is at `peak_db` dBFS (the unclipped signal: nothing was cut off yet);
   4. volume: multiply by the master volume.  Anything over full scale is clipped, and counted in the result.
 Times are seconds ("1.5", "1.5s"), milliseconds ("250ms"), "m:ss" ("1:05.5") or audio frames at 44100 per second ("88200f").
@@ -25,8 +26,11 @@ from .player import TunePlayer
 from .song import Song
 from .synth import RATE, to_pcm16
 
-FORMATS = ("wav", "mid", "mml", "csp")
-SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp"}
+FORMATS = ("wav", "mp3", "ogg", "mid", "mml", "csp")
+AUDIO = ("wav", "mp3", "ogg")                      # the rendered ones; mp3 and ogg need the soundfile package
+SUFFIXES = {".wav": "wav", ".mp3": "mp3", ".ogg": "ogg", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp"}
+ENCODERS = {"mp3": ("MP3", "MPEG_LAYER_III"), "ogg": ("OGG", "VORBIS")}        # soundfile's format and subtype
+PAD = 0.02                                          # seconds kept after the last sound when trimming
 
 
 class ExportError(Exception):
@@ -42,11 +46,13 @@ class AudioOptions:
     end: int = None                      # frame to stop at (not kept); None: the natural end
     loops: int = 0                       # trips round the loop after the first pass
     tail: float = 2.0                    # seconds left to ring out after the song's last note
+    trim_db: float = None                # cut the silence at the end: everything after the last sample above this
+                                         # level (dBFS, relative to the loudest sample) plus PAD; None keeps it
 
     def used(self):
-        """The options set to something other than their default (those that mean nothing outside a WAV)."""
+        """The options set to something other than their default (those that mean nothing outside audio)."""
         d = AudioOptions()
-        return [k for k in ("volume", "normalize", "start", "end", "loops") if getattr(self, k) != getattr(d, k)]
+        return [k for k in ("volume", "normalize", "start", "end", "loops", "trim_db") if getattr(self, k) != getattr(d, k)]
 
 
 @dataclass
@@ -176,6 +182,9 @@ def render_audio(tune, opts=None):
         raise ExportError("the start (%.2fs) is past the end of the audio (%.2fs)" % (o.start / RATE, total / RATE))
     audio = player.render(total)[o.start:total]
     peak = float(np.abs(audio).max()) if audio.size else 0.0
+    if o.trim_db is not None and peak > 0:
+        loud = np.nonzero(np.abs(audio).max(axis=1) > peak * 10 ** (o.trim_db / 20))[0]
+        audio = audio[:min(len(audio), int(loud[-1]) + 1 + int(PAD * RATE))]
     if o.normalize:
         if peak > 0:
             audio = audio * (10 ** (o.peak_db / 20) / peak)
@@ -199,6 +208,19 @@ def write_wav(path, audio):
         f.writeframes(to_pcm16(audio))
 
 
+def write_audio(path, audio, fmt):
+    """Write float stereo samples as wav (always available), or as mp3 / ogg through the soundfile package."""
+    if fmt == "wav":
+        return write_wav(path, audio)
+    try:
+        import soundfile
+    except ImportError:
+        raise ExportError("writing %s needs the soundfile package (pip install soundfile, or chipsynth[encode])" % fmt)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    form, subtype = ENCODERS[fmt]
+    soundfile.write(str(path), np.clip(audio, -1.0, 1.0), RATE, format=form, subtype=subtype)
+
+
 # ------------------------------------------------------------------ the song
 def format_of(path, fmt=None):
     if fmt:
@@ -216,14 +238,15 @@ def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None):
     opts = opts or AudioOptions()
     fmt = format_of(path, fmt)
     song_id = pick_song(pkg, song_id)
-    if fmt != "wav" and opts.used():
-        raise ExportError("%s only applies to a wav, not a %s" % (", ".join("--" + k for k in opts.used()), fmt))
+    if fmt not in AUDIO and opts.used():
+        raise ExportError("%s only applies to audio (%s), not a %s"
+                          % (", ".join("--" + k.replace("_db", "") for k in opts.used()), ", ".join(AUDIO), fmt))
     path = Path(path)
     r = Result(path, fmt)
     try:
-        if fmt == "wav":
+        if fmt in AUDIO:
             audio, r.peak_db, r.clipped, r.notes = render_audio(pkg.tune(song_id, lib), opts)
-            write_wav(path, audio)
+            write_audio(path, audio, fmt)
             r.frames, r.written = len(audio), [path]
         elif fmt == "mid":
             path.parent.mkdir(parents=True, exist_ok=True)

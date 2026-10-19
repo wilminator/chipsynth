@@ -21,10 +21,15 @@
                                     -d DIR   where to write (default .)   -o FILE   write one thing to FILE ('-' = stdout)
                                     --type T --name GLOB   which components   --midi   songs as .mid instead
   export-song SOURCE[:SONG] [SONG] -o OUT [options]      (also: render)
-                                  one song as wav, mid, mml or csp (from OUT's ending, or --format)
-                                    wav only: --volume V (0.5, 50%, -6dB)  --normalize [--peak DB, default -1]
+                                  one song as wav, mp3, ogg, mid, mml or csp (from OUT's ending, or --format;
+                                  mp3 and ogg need the soundfile package: pip install chipsynth[encode])
+                                    audio only: --volume V (0.5, 50%, -6dB)  --normalize [--peak DB, default -1]
                                               --start T  --end T   (1.5 | 250ms | 1:05.5 | 88200f = frames)
                                               --loops N  (trips round the loop)  --tail SECONDS  (default 2)
+                                              --trim [DB]  cut the silence at the end (below DB of the peak, -60)
+  sfx SOURCE... -d DIR [-f wav|mp3|ogg]
+                                  sound effects: every .mml / .csp song as a one-shot file, trimmed and normalized
+                                  (--no-normalize, --trim off, --peak, --volume, --tail SECONDS default 1)
   generate KIND [options]         a generated tune as MML (stdout, or -o FILE.mml):
                                     --seed N  --mood calm|tense|bright|dark  --tempo BPM
                                     --dac         drums as samples on D1 / D2          (kick, snare, hats, crash, toms)
@@ -245,29 +250,89 @@ def export_song_cmd(args):
     p.add_argument("song", nargs="?", metavar="SONG", help="the song id (not needed when there is only one)")
     p.add_argument("-o", "--output", metavar="OUT", required=True, help="the file to write")
     p.add_argument("-f", "--format", choices=exporter.FORMATS, help="default: from the ending of OUT")
-    p.add_argument("--volume", metavar="V", default="1", help="(wav) master volume: 0.5, 50%% or -6dB (default 1)")
-    p.add_argument("--normalize", action="store_true", help="(wav) scale the loudest sample to --peak; volume is applied after")
-    p.add_argument("--peak", metavar="DB", default="-1", help="(wav) the level --normalize aims for (default -1 dBFS)")
-    p.add_argument("--start", metavar="T", default="0", help="(wav) first moment kept: 1.5, 250ms, 1:05.5 or 88200f (frames)")
-    p.add_argument("--end", metavar="T", help="(wav) where to stop (default: the end of the song and its tail)")
-    p.add_argument("--loops", type=int, default=0, metavar="N", help="(wav) trips round the loop after the first pass")
-    p.add_argument("--tail", type=float, default=2.0, metavar="S", help="(wav) seconds to let the last notes ring (default 2)")
+    add_audio_options(p)
     add_library_options(p)
-    a = p.parse_args(glue(args, "--volume", "--peak"))
+    a = p.parse_args(glue(args, *AUDIO_FLAGS))
     src, song = exporter.split_source(a.source)
     lib = library(a)
     pkg = exporter.open_source(src, lib)
     if a.song and song and a.song != song:
         p.error("two songs named: %s and %s" % (song, a.song))
-    opts = exporter.AudioOptions(volume=exporter.gain(a.volume), normalize=a.normalize, peak_db=exporter.decibels(a.peak),
-                                 start=exporter.frames(a.start), end=exporter.frames(a.end) if a.end else None,
-                                 loops=a.loops, tail=a.tail)
-    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib)
+    r = exporter.export_song(pkg, a.song or song, a.output, audio_options(a), a.format, lib)
+    report(r)
+    return 0
+
+
+def report(r):
     for w in r.written:
         print("wrote", w, *(["(%.2fs, peak %s)" % (r.seconds, "silent" if r.peak_db is None else "%.1f dBFS" % r.peak_db)]
-                            if r.format == "wav" and w == r.path else []))
+                            if r.format in exporter.AUDIO and w == r.path else []))
     for n in r.notes:
         print("note:", n, file=sys.stderr)
+
+
+AUDIO_FLAGS = ("--volume", "--peak", "--trim")
+
+
+def add_audio_options(p, sfx=False):
+    """The options of a rendered export.  For `sfx` the defaults suit a one-shot cue: normalized, trimmed, a short tail."""
+    a = "(audio) " if not sfx else ""
+    p.add_argument("--volume", metavar="V", default="1", help=a + "master volume: 0.5, 50%% or -6dB (default 1)")
+    if sfx:
+        p.add_argument("--no-normalize", dest="normalize", action="store_false", help="keep the rendered level")
+    else:
+        p.add_argument("--normalize", action="store_true", help=a + "scale the loudest sample to --peak; volume is applied after")
+    p.add_argument("--peak", metavar="DB", default="-1", help=a + "the level --normalize aims for (default -1 dBFS)")
+    p.add_argument("--trim", metavar="DB", nargs="?", const="-60", default="-60" if sfx else None,
+                   help=a + "cut the silence at the end: after the last sample above DB (relative to the peak; %s)"
+                   % ("default -60; --trim off keeps it" if sfx else "-60 when no DB is given"))
+    if not sfx:
+        p.add_argument("--start", metavar="T", default="0", help=a + "first moment kept: 1.5, 250ms, 1:05.5 or 88200f (frames)")
+        p.add_argument("--end", metavar="T", help=a + "where to stop (default: the end of the song and its tail)")
+        p.add_argument("--loops", type=int, default=0, metavar="N", help=a + "trips round the loop after the first pass")
+    p.add_argument("--tail", type=float, default=1.0 if sfx else 2.0, metavar="S",
+                   help=a + "seconds to let the last notes ring (default %d)" % (1 if sfx else 2))
+
+
+def audio_options(a):
+    trim = None if a.trim in (None, "off") else exporter.decibels(a.trim)
+    return exporter.AudioOptions(volume=exporter.gain(a.volume), normalize=a.normalize, peak_db=exporter.decibels(a.peak),
+                                 start=exporter.frames(getattr(a, "start", "0")),
+                                 end=exporter.frames(a.end) if getattr(a, "end", None) else None,
+                                 loops=getattr(a, "loops", 0), tail=a.tail, trim_db=trim)
+
+
+def sfx_cmd(args):
+    p = parser("sfx", "Render sound effects: every song of the sources as a one-shot audio file in DIR (trimmed, normalized).")
+    p.add_argument("sources", nargs="+", metavar="SOURCE", help="a .mml (one cue, named after the file), a .csp (one per song), "
+                   "or a folder of them")
+    p.add_argument("-d", metavar="DIR", default=".", help="the folder to write into (default: here)")
+    p.add_argument("-f", "--format", choices=exporter.AUDIO, default="wav", help="wav (default), mp3 or ogg")
+    add_audio_options(p, sfx=True)
+    add_library_options(p)
+    a = p.parse_args(glue(args, *AUDIO_FLAGS))
+    lib = library(a)
+    opts = audio_options(a)
+    files = []
+    for src in a.sources:
+        s = Path(src)
+        files.extend(sorted(x for x in s.iterdir() if x.suffix.lower() in (".mml", ".csp")) if s.is_dir() else [s])
+    if not files:
+        raise exporter.ExportError("nothing to render (the sources hold no .mml or .csp files)")
+    out = Path(a.d)
+    cues, seen = [], {}
+    for f in files:
+        pkg = exporter.open_source(f, lib)
+        for sid in pkg.songs:
+            name = f.stem if f.suffix.lower() == ".mml" else sid
+            if name in seen:
+                raise exporter.ExportError("two cues would be written as %s.%s: %s and %s (rename one, or render them apart)"
+                                           % (name, a.format, seen[name], f))
+            seen[name] = f
+            cues.append((pkg, sid, name))
+    for pkg, sid, name in cues:
+        report(exporter.export_song(pkg, sid, out / (name + "." + a.format), opts, a.format, lib))
+    print("%d effect(s) in %s" % (len(cues), out))
     return 0
 
 
@@ -296,6 +361,8 @@ def main(argv):
             return export_cmd(args)
         elif cmd in ("export-song", "render"):
             return export_song_cmd(args)
+        elif cmd == "sfx":
+            return sfx_cmd(args)
         elif cmd == "generate":
             return generate_cmd(args)
         else:
