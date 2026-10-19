@@ -114,6 +114,11 @@ class TunePlayer:
         out *= MASTER * self.volume
         return out
 
+    def frames(self, loops=0, tail=2.0):
+        """Samples in the first pass, `loops` more trips round the loop (when it loops) and `tail` seconds to ring out."""
+        trips = loops * self._seg if self.loop and self._seg > 0 else 0
+        return self._pass_len + trips + int(round(tail * RATE))
+
     def next_bar_sample(self):
         """The absolute sample at which the next bar line falls (a loop marker sits on a bar line)."""
         t = self.synth.t

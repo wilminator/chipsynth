@@ -34,7 +34,8 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `midi.py` | Standard MIDI files: `to_midi(tune)`, `from_midi(bytes)` -> Song |
 | `songedit.py` | `Editor`: note-level edits of a Song (add, erase, pitch, resize, move) with undo / redo |
 | `song.py`, `songmml.py` | the `Song` model (clips, repeats, calls kept as objects), `Song.compile()` to a `Tune`, MML import / export: `Song.from_mml(text)`, `song.to_mml()` |
-| `package.py`, `packageset.py`, `packagetext.py` | the `.csp` package file (several songs + shared instruments / samples), `PackageSet` (load many, pick `package:song`), text dump / build; `python -m chipsynth list|dump|build|import|export` |
+| `package.py`, `packageset.py`, `packagetext.py` | the `.csp` package file (several songs + shared instruments / samples), `PackageSet` (load many, pick `package:song`), text dump / build |
+| `components.py`, `exporter.py`, `__main__.py` | the command line (below): list / filter / export / import components, export a song as wav, mid, mml or csp |
 | `player.py` | `TunePlayer`: schedules a `Tune` on the synth, loops, tails ring over the restart |
 | `output.py` | `MusicOut`: live playback through pygame (the only place pygame is used) |
 | `musicgen.py` | a seeded tune generator (`generate(kind, seed, mood, tempo)` returns MML text) |
@@ -76,6 +77,40 @@ yourself). It imports nothing from the Blobs game.
 `python -m chipsynth.compose` is the same command. GAMEDIR is a folder with a `music/` folder (loose `.mml` files, `.csp`
 packages, `music/lib`); SONG is a song id like `forest:dawn` or a `.mml` / `.csp` path. With no arguments it opens a
 generated tune.
+
+## Command line (`python -m chipsynth`)
+
+A `.csp` package holds songs and what they share. Its *components* are of five types: `song`, `instrument`, `fx` (effect
+sets), `scale` and `sample` (DPCM). `add_song` copies what a song uses into the song, so most instruments, effect sets and
+scales belong to a song (their scope in `list`); the rest are `shared` by all the package's songs. `python -m chipsynth -h`
+and `COMMAND -h` give every option.
+
+| command | does |
+|---|---|
+| `import PKG.csp FILE.mml...` | add songs to a package (created if missing). `--id NAME` names the song, `--shared` adds a library file's instruments / fx / scales / samples to the package, `--no-replace` refuses an id already there, `--lib DIR` / `--samples DIR` say where a game's `music/lib` and `.dpcm` files are. `.mid` files work too |
+| `list SOURCE...` | the components of `.csp` / `.mml` / folders: `--type song,sample,...` (aliases `instr`, `key`), `--name 'd*'` (a glob; `TYPE:NAME` for one type) |
+| `export PKG.csp` | components as MML: `-d DIR` (songs as `ID.mml`, the rest in `lib/PACKAGE.mml`, samples in `samples/NAME.dpcm`, which is a game's `music/` layout), or `-o FILE` (`-` for stdout) for one thing; `--type` / `--name` choose; `--midi` writes songs as `.mid`. With no `--type`: songs and the shared parts |
+| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml` or `csp` (from OUT's ending, or `-f`). `render` is the same command |
+| `generate`, `dump`, `build` | as before |
+
+`export-song` options for a **WAV** (any of them with another format is an error):
+
+| option | does |
+|---|---|
+| `--volume V` | master volume: `0.5`, `50%` or `-6dB` (default 1). Anything over full scale is clipped and reported |
+| `--normalize`, `--peak DB` | scale the loudest sample to `DB` dBFS (default -1) of the part you keep, before `--volume` is applied |
+| `--start T`, `--end T` | keep from `T` to `T`: `1.5`, `250ms`, `1:05.5` or `88200f` (audio frames, 44100 per second). Past the natural end the song keeps looping if `--loops` > 0, else is silent |
+| `--loops N` | trips round the loop after the first pass (nothing for a `once` song, which says so) |
+| `--tail S` | seconds to let the last notes ring (default 2) |
+
+    python -m chipsynth import music/forest.csp dawn.mml dusk.mml --lib game/music/lib
+    python -m chipsynth list music/forest.csp --type song,sample
+    python -m chipsynth export music/forest.csp -d out --name 'd*'
+    python -m chipsynth export-song music/forest.csp:dawn -o dawn.wav --loops 2 --normalize --volume -3dB --start 2 --end 1:30
+
+A song exported as MML (`export`, or `export-song -f mml`) declares the package samples it plays under `[sample]` and writes
+them as `samples/NAME.dpcm` beside it; import it with `--samples samples` to get the same package back. In Python the same
+work is `components.py` (`components`, `select`, `export_mml`, `import_mml`) and `exporter.py` (`export_song`, `AudioOptions`).
 
 ## Tests
 
