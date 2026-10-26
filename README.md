@@ -70,7 +70,7 @@ options and shows that preview live.
 
 `chipsynth/composer/` is a resizable piano-roll / tracker window for writing songs. It is an optional extra: the rest of
 the library never imports it, and it is the only part that imports pygame at the top of a module (install `pygame`
-yourself). It imports nothing from the Blobs game.
+yourself). It imports nothing from any host application.
 
     python -m chipsynth.composer [GAMEDIR] [SONG] [--nosound] [--reset]
 

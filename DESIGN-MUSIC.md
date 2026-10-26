@@ -1,4 +1,4 @@
-# Blobs! chiptune engine -- design notes
+# chipsynth chiptune engine -- design notes
 
 Author: Mike.  Status: design talk in progress.  Built so far: see 'Built' at the end.
 
@@ -172,7 +172,7 @@ Author: Mike.  Status: design talk in progress.  Built so far: see 'Built' at th
 - **Seamless loop:** release tails, echoes and slides ringing at the loop end carry over the restart (no gap or click).
 
 ## Import utilities (later)
-- **FamiStudio import** (requested): convert FamiStudio projects/exports into Blobs tunes (NES channels -> our 4 channels + DACs;
+- **FamiStudio import** (requested): convert FamiStudio projects/exports into chipsynth tunes (NES channels -> our 4 channels + DACs;
   DPCM samples map straight to the DACs). Check which FamiStudio export (its text export, .fms project, or a standard like MIDI)
   is the most practical to read before building.
 - **SID tracker import** (requested, if a common tool is found): candidates to evaluate are GoatTracker, SID-Wizard

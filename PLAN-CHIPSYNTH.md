@@ -1,3 +1,5 @@
+> Historical record of how this library was extracted from the game it was first built for; the paths below name that game.
+
 # Plan: the `chipsynth` library and the song composer
 
 Decided with Mike (2026-10-13): split the music engine into a subpackage first (it can become its own project later);
