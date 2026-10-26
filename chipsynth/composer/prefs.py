@@ -20,6 +20,7 @@ class Prefs:
     font: int = 15                   # text height in pixels; everything else scales with it
     ppb: float = 56.0                # horizontal scale: pixels per beat
     row: float = 14.0                # vertical scale: pixels per semitone
+    track_h: int = 96                # height of one track in the track stack (pixels at UI scale 1)
     width: int = 1280
     height: int = 760
     last: str = ""
@@ -45,6 +46,7 @@ class Prefs:
         out.font = max(11, min(28, out.font))
         out.ppb = max(6.0, min(400.0, float(out.ppb)))
         out.row = max(6.0, min(48.0, float(out.row)))
+        out.track_h = max(56, min(400, int(out.track_h)))
         return out
 
     def save(self, path=None):
