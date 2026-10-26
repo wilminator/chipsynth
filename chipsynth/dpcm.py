@@ -321,7 +321,7 @@ def dumps(s):
 def loads(data, name=""):
     try:
         if data[:4] != MAGIC:
-            raise DpcmError("not a Blobs sample file")
+            raise DpcmError("not a chipsynth sample file")
         ver, rate, ntr = struct.unpack_from("<BBB", data, 4)
         if ver != 1 or rate > 15 or ntr not in (1, 2):
             raise DpcmError("unsupported sample file")
@@ -384,7 +384,7 @@ def demo_wavs(folder):
 
 def main(argv=None):
     import argparse
-    ap = argparse.ArgumentParser(prog="python -m chipsynth.dpcm", description="WAV -> Blobs DAC samples (music/samples)")
+    ap = argparse.ArgumentParser(prog="python -m chipsynth.dpcm", description="WAV -> chipsynth DAC samples")
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo", help="write kick/snare/zap demo WAVs into GAMEDIR/music/wav")
     d.add_argument("gamedir")

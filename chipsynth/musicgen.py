@@ -595,7 +595,7 @@ def generate(kind, seed, mood="", tempo=None, dac=False, dac_bass=False, voice=F
     em = {v: Emitter() for v in voices}
     name = "%s %d%s" % (kind.capitalize(), int(seed), " (%s)" % song.mood if song.mood else "")
     extras = [w for w, on in (("drums", dac), ("bass", dac_bass), ("voice accent", voice)) if on]
-    lines = ["// generated:", "title " + name, "author Blobs generator",
+    lines = ["// generated:", "title " + name, "author chipsynth generator",
              "comment %s in %s, %d bpm%s" % (kind, song.mode, song.bpm, ", DAC " + ", ".join(extras) if extras else ""),
              "tempo %d" % song.bpm, "time 4/4"]
     if song.once:
