@@ -78,6 +78,11 @@ yourself). It imports nothing from any host application.
 packages, `music/lib`); SONG is a song id like `forest:dawn` or a `.mml` / `.csp` path. With no arguments it opens a
 generated tune.
 
+The centre of the window has three views (Tab or the buttons at the top switch): **Tracks** lists every track as a lane
+of the same height, one below the other, scrolling up and down (the track height is a setting: Ctrl+Shift+wheel or the
+**T** buttons, remembered between sessions); **Piano roll** is one large piano roll for all the voices; **Tracker** is
+the grid with time running down the page.
+
 ## Command line (`python -m chipsynth`)
 
 A `.csp` package holds songs and what they share. Its *components* are of five types: `song`, `instrument`, `fx` (effect

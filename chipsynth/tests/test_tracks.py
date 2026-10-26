@@ -165,6 +165,17 @@ class PrefsHeight(unittest.TestCase):
             p.write_text('{"track_h": "tall"}')
             self.assertEqual(Prefs.load(p).track_h, 96)
 
+    def test_the_centre_view_is_remembered_and_a_bad_one_falls_back_to_the_stack(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "c.json"
+            self.assertEqual(Prefs.load(p).view, "stack")            # no file: the track view
+            pr = Prefs()
+            pr.view = "tracker"
+            pr.save(p)
+            self.assertEqual(Prefs.load(p).view, "tracker")
+            p.write_text('{"view": "wide"}')
+            self.assertEqual(Prefs.load(p).view, "stack")
+
 
 if __name__ == "__main__":
     unittest.main()

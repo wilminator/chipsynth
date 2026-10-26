@@ -238,7 +238,7 @@ class AppTests(unittest.TestCase):
         self.screen = pygame.display.set_mode(self.size, pygame.RESIZABLE)
         self.dir = Path(tempfile.mkdtemp())
         self.prefs_path = self.dir / "prefs.json"
-        self.app = Composer(self.screen, Prefs(), prefs_path=self.prefs_path)
+        self.app = Composer(self.screen, Prefs(view="roll"), prefs_path=self.prefs_path)
         self.app.frame()
         self.app.load_song(Song.from_mml(TUNE), "Test")
         self.app.frame()
@@ -486,11 +486,11 @@ class AppTests(unittest.TestCase):
 
     def test_empty_window_and_dac_only_song_draw(self):
         screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
-        blank = Composer(screen, Prefs(), prefs_path=self.prefs_path)
+        blank = Composer(screen, Prefs(view="roll"), prefs_path=self.prefs_path)
         blank.frame()
         blank.frame([key(pygame.K_SPACE), key(pygame.K_m), key(pygame.K_HOME)])
         lb = lib_with_samples()
-        drums = Composer(screen, Prefs(), lib=lb, prefs_path=self.prefs_path)
+        drums = Composer(screen, Prefs(view="roll"), lib=lb, prefs_path=self.prefs_path)
         drums.frame()
         self.assertTrue(drums.load_song(Song.from_mml("D1: kick8 r8 kick8 r4\n[sample]\nkick\n", lb), "Drums only"))
         drums.frame()
@@ -511,7 +511,7 @@ class EditTests(unittest.TestCase):
         pygame.init()
         self.screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
         self.dir = Path(tempfile.mkdtemp())
-        self.app = Composer(self.screen, Prefs(), prefs_path=self.dir / "prefs.json", root=self.dir)
+        self.app = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "prefs.json", root=self.dir)
         self.app.frame()
         self.song = Song.from_mml("title T\ntempo 120\nV1: o4 c4 r4 e4 r4\n")
         self.app.load_song(self.song, "T", source=str(self.dir / "t.mml"))
@@ -618,7 +618,7 @@ class EditTests(unittest.TestCase):
         self.assertTrue(a.save(path))
         back = pk.load(path)
         self.assertEqual([n.pitch for n in back.tune("pack").voices[0]], [48, 55, 52])
-        b = Composer(self.screen, Prefs(), prefs_path=self.dir / "p2.json")
+        b = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "p2.json")
         self.assertTrue(b.open_path(path))
         self.assertEqual(len(b.tune.voices[0]), 3)
 
@@ -630,7 +630,7 @@ class EditTests(unittest.TestCase):
         pk.save(pkg, path)
         ps = PackageSet()
         ps.add(path)
-        a = Composer(self.screen, Prefs(), packages=ps, prefs_path=self.dir / "p3.json", root=self.dir)
+        a = Composer(self.screen, Prefs(view="roll"), packages=ps, prefs_path=self.dir / "p3.json", root=self.dir)
         a.frame()
         a.open_song_id("two:b")
         a.frame()
@@ -699,7 +699,7 @@ class DrumTests(unittest.TestCase):
         pygame.init()
         self.screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
         self.dir = Path(tempfile.mkdtemp())
-        self.app = Composer(self.screen, Prefs(), prefs_path=self.dir / "prefs.json", root=self.dir)
+        self.app = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "prefs.json", root=self.dir)
         self.app.frame()
         self.app.load_song(Song.from_mml("title D\ntempo 120\nV1: o4 c4 d4 e4 f4\n"), "D", source=str(self.dir / "d.mml"))
         self.app.frame()
@@ -761,7 +761,7 @@ class DrumTests(unittest.TestCase):
         a.frame([down(p), up(p)])
         path = self.dir / "drums.csp"
         self.assertTrue(a.save(path))
-        b = Composer(self.screen, Prefs(), prefs_path=self.dir / "p2.json")
+        b = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "p2.json")
         self.assertTrue(b.open_path(path))
         self.assertEqual([e[0] for e in b.tune.dac[0] if e[1] == "play"], [0])
 
@@ -797,7 +797,7 @@ class SongSettingsTests(unittest.TestCase):
         pygame.init()
         self.screen = pygame.display.set_mode((1280, 900), pygame.RESIZABLE)
         self.dir = Path(tempfile.mkdtemp())
-        self.app = Composer(self.screen, Prefs(), prefs_path=self.dir / "prefs.json", root=self.dir)
+        self.app = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "prefs.json", root=self.dir)
         self.app.frame()
         text = "title S\n[pat]\nriff = c4 d4 e4 r4\nV1: o4 !riff !riff !riff\nV2: o3 c1 c1 c1\n"
         self.app.load_song(Song.from_mml(text), "S")
@@ -865,7 +865,7 @@ class TrackerTests(unittest.TestCase):
         pygame.init()
         self.screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
         self.dir = Path(tempfile.mkdtemp())
-        self.app = Composer(self.screen, Prefs(), prefs_path=self.dir / "prefs.json", root=self.dir)
+        self.app = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "prefs.json", root=self.dir)
         self.app.frame()
         self.app.load_song(Song.from_mml("title T\ntempo 120\nV1: o4 c4 r4 e4 r4\nV2: o3 c2\n"), "T")
         self.app.frame()
@@ -883,6 +883,8 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual(a.mode, "tracker")
         px = pygame.surfarray.array3d(self.screen)
         self.assertGreater(int(px.std()), 5)
+        a.frame([key(pygame.K_TAB)])
+        self.assertEqual(a.mode, "stack")                       # tracker -> tracks -> roll -> tracker
         a.frame([key(pygame.K_TAB)])
         self.assertEqual(a.mode, "roll")
 
@@ -973,7 +975,7 @@ class MultiSelectTests(unittest.TestCase):
         pygame.init()
         self.screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
         self.dir = Path(tempfile.mkdtemp())
-        self.app = Composer(self.screen, Prefs(), prefs_path=self.dir / "prefs.json", root=self.dir)
+        self.app = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "prefs.json", root=self.dir)
         self.app.frame()
         self.app.load_song(Song.from_mml("tempo 120\nV1: o4 c4 d4 e4 f4 g4 a4 b4\n"), "M")
         self.app.frame()
@@ -1054,7 +1056,7 @@ class MultiSelectTests(unittest.TestCase):
         self.assertTrue(a.save(path))                                  # a .mid is an export, not a save
         self.assertTrue(path.is_file())
         self.assertFalse(a.song_dirty)
-        b = Composer(self.screen, Prefs(), prefs_path=self.dir / "p2.json")
+        b = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "p2.json")
         self.assertTrue(b.open_path(path))
         self.assertEqual([(n.start, n.dur, n.pitch) for n in b.tune.voices[0]], self.notes())
         self.assertEqual(b.source, "")
@@ -1085,7 +1087,7 @@ class PatternAndRangeTests(unittest.TestCase):
         pygame.init()
         self.screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
         self.dir = Path(tempfile.mkdtemp())
-        self.app = Composer(self.screen, Prefs(), prefs_path=self.dir / "prefs.json", root=self.dir)
+        self.app = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "prefs.json", root=self.dir)
         self.app.frame()
         self.app.load_song(Song.from_mml("tempo 120\nV1: o4 c4 d4 e4 f4 g4 a4 b4\n"), "M")
         self.app.frame()
@@ -1129,7 +1131,7 @@ class NewFromGeneratorTests(unittest.TestCase):
         pygame.init()
         self.screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
         self.dir = Path(tempfile.mkdtemp())
-        self.app = Composer(self.screen, Prefs(), prefs_path=self.dir / "prefs.json", root=self.dir)
+        self.app = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "prefs.json", root=self.dir)
         self.app.frame()
 
     def test_ctrl_n_opens_the_dialog_then_enter_opens_the_generated_tune(self):
@@ -1312,7 +1314,7 @@ class NewFromGeneratorTests(unittest.TestCase):
     def test_f1_hint_is_always_in_the_status_strip(self):
         for size in ((960, 600), (1280, 760)):
             screen = pygame.display.set_mode(size, pygame.RESIZABLE)
-            a = Composer(screen, Prefs(), prefs_path=self.dir / ("p%d.json" % size[0]), root=self.dir)
+            a = Composer(screen, Prefs(view="roll"), prefs_path=self.dir / ("p%d.json" % size[0]), root=self.dir)
             a.frame()
             b = a.layout.bottom
             strip = screen.subsurface((b[0] + b[2] - 80, b[1] + b[3] - 24, 70, 20))
@@ -1336,7 +1338,7 @@ class NoteVolumeEffectKeyTests(unittest.TestCase):
         pygame.init()
         self.screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
         self.dir = Path(tempfile.mkdtemp())
-        self.app = Composer(self.screen, Prefs(), prefs_path=self.dir / "prefs.json", root=self.dir)
+        self.app = Composer(self.screen, Prefs(view="roll"), prefs_path=self.dir / "prefs.json", root=self.dir)
         self.app.frame()
         self.app.load_song(Song.from_mml(self.SONG), "T")
         self.app.snap_i = 0                                         # quarter-note rows: row n is note n
@@ -1492,3 +1494,195 @@ class NoteVolumeEffectKeyTests(unittest.TestCase):
         keys = " ".join(k for k, d in panels.HELP)
         for want in ("K", "Alt+Up / Down", "Tracker , / .", "Tracker ; / :"):
             self.assertIn(want, keys)
+
+
+def wheel(dy, dx=0):
+    return pygame.event.Event(pygame.MOUSEWHEEL, x=dx, y=dy, precise_x=float(dx), precise_y=float(dy))
+
+
+class StackTests(unittest.TestCase):
+    """The track stack: fixed-height lanes for every track, scrolled vertically."""
+    def setUp(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        self.dir = Path(tempfile.mkdtemp())
+        pr = Prefs()                                              # the track view is the default
+        self.app = Composer(self.screen, pr, prefs_path=self.dir / "prefs.json", root=self.dir)
+        self.app.frame()
+        self.app.load_song(Song.from_mml(TUNE), "Test", source=str(self.dir / "t.mml"))
+        self.app.frame()
+        self.a = self.app
+
+    def lane_pt(self, lane, tick, pitch=None, frac=0.5):
+        """A point in lane `lane` at `tick` (at `pitch`'s row, or `frac` of the way down the lane)."""
+        a = self.a
+        g = a.geo["grid"]
+        x = int(a.view.x_of(tick, g[0]) + 3)
+        if pitch is None:
+            y = g[1] + a.stack.top_of(lane) + int(a.stack.height * frac)
+        else:
+            y = int(g[1] + a.stack.y_of(lane, pitch, a.roll) + a.stack.row_px(lane, a.roll) / 2)
+        return x, y
+
+    def test_it_opens_in_the_stack_with_its_own_geometry(self):
+        a = self.a
+        self.assertEqual(a.mode, "stack")
+        self.assertEqual(a.layout.left[2], 0)                      # the voices panel is not needed: the headers say it
+        g, h = a.geo["grid"], a.geo["heads"]
+        self.assertEqual(g[0], h[0] + h[2])
+        self.assertEqual(a.stack.count, 6)
+
+    def test_it_draws_at_several_sizes_in_both_themes(self):
+        a = self.a
+        for size in ((960, 600), (1280, 760), (1920, 1080)):
+            self.screen = pygame.display.set_mode(size, pygame.RESIZABLE)
+            a.screen = self.screen
+            for dark in (True, False):
+                a.prefs.dark = dark
+                a.frame()
+                self.assertGreater(int(pygame.surfarray.array3d(self.screen).std()), 5)
+
+    def test_clicking_a_header_picks_the_track(self):
+        a = self.a
+        a.frame()
+        r = a.voice_cards[2]
+        a.frame([down((r[0] + 10, r[1] + 20)), up((r[0] + 10, r[1] + 20))])
+        self.assertEqual(a.sel_voice, 2)
+
+    def test_clicking_a_note_picks_its_track_and_note(self):
+        a = self.a
+        n = a.roll.notes[1][0]                                     # V2's first note
+        p = self.lane_pt(1, n.start + 4, n.pitch)
+        a.frame([down(p), up(p)])
+        self.assertEqual(a.sel_voice, 1)
+        self.assertEqual(a.note_sel, (1, 0))
+
+    def test_a_new_note_goes_into_the_lane_clicked_at_that_lanes_pitch(self):
+        a = self.a
+        lane = 3                                                   # V4 is empty
+        p = self.lane_pt(lane, 192, frac=0.25)
+        want = a.stack.pitch_at(lane, p[1] - a.geo["grid"][1], a.roll)
+        a.frame([down(p), up(p)])
+        self.assertEqual(a.sel_voice, lane)
+        self.assertEqual([(n.start, n.pitch) for n in a.tune.voices[3]], [(192, want)])
+
+    def test_dragging_a_note_keeps_it_in_its_own_lane(self):
+        a = self.a
+        n = a.roll.notes[0][0]
+        p = self.lane_pt(0, n.start + 4, n.pitch)
+        q = (p[0] + int(M.BEAT * a.view.ppt), p[1] + a.stack.height * 3)          # far below, over other lanes
+        a.frame([down(p)])
+        a.frame([move(q)])
+        a.frame([up(q)])
+        self.assertEqual(len(a.tune.voices[0]), len(a.roll.notes[0]))
+        self.assertEqual(len(a.tune.voices[1]), 2)                                # V2 untouched
+        low, _ = a.stack.window(0, a.roll)
+        self.assertGreaterEqual(min(x.pitch for x in a.tune.voices[0]), min(low, n.pitch) - 1)
+
+    def test_a_drum_hit_is_placed_in_its_lane(self):
+        a = self.a
+        a.sample_name = ""
+        p = self.lane_pt(4, 96)
+        a.frame([down(p), up(p)])
+        self.assertEqual(a.sel_voice, 4)                           # no sample picked: it says so and places nothing
+        self.assertEqual(a.tune.dac[0], [])
+
+    def test_the_wheel_scrolls_the_stack_and_stops_at_the_ends(self):
+        a = self.a
+        a.set_track_h(200)
+        a.frame()
+        g = a.geo["grid"]
+        a.ui.pos = (g[0] + 50, g[1] + 50)
+        self.assertEqual(a.stack.scroll, 0)
+        a.frame([wheel(-1)])
+        self.assertGreater(a.stack.scroll, 0)
+        a.frame([wheel(-100)])
+        self.assertEqual(a.stack.scroll, a.stack.max_scroll(g[3]))
+        a.frame([wheel(100)])
+        self.assertEqual(a.stack.scroll, 0)
+
+    def test_ctrl_shift_wheel_changes_the_track_height_and_it_is_remembered(self):
+        a = self.a
+        g = a.geo["grid"]
+        a.ui.pos = (g[0] + 50, g[1] + 50)
+        real = pygame.key.get_mods
+        try:
+            pygame.key.get_mods = lambda: pygame.KMOD_CTRL | pygame.KMOD_SHIFT
+            a.frame([wheel(2)])
+        finally:
+            pygame.key.get_mods = real
+        self.assertGreater(a.prefs.track_h, 96)
+        self.assertEqual(a.stack.height, int(round(a.prefs.track_h * a.scale)))
+        a.save_prefs()
+        self.assertEqual(Prefs.load(self.dir / "prefs.json").track_h, a.prefs.track_h)
+
+    def test_the_height_setting_is_limited(self):
+        a = self.a
+        a.set_track_h(10_000)
+        self.assertEqual(a.prefs.track_h, 400)
+        a.set_track_h(1)
+        self.assertEqual(a.prefs.track_h, 56)
+
+    def test_picking_a_track_scrolls_it_into_view(self):
+        a = self.a
+        a.set_track_h(220)
+        a.frame()
+        a.sel_voice = 5
+        a.frame()
+        g = a.geo["grid"]
+        top = a.stack.top_of(5)
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(top + a.stack.height, g[3])
+
+    def test_up_and_down_pick_the_neighbouring_track(self):
+        a = self.a
+        a.frame([key(pygame.K_DOWN)])
+        self.assertEqual(a.sel_voice, 1)
+        a.frame([key(pygame.K_UP), key(pygame.K_UP)])
+        self.assertEqual(a.sel_voice, 0)
+
+    def test_the_scroll_bar_thumb_moves_the_stack(self):
+        a = self.a
+        a.set_track_h(220)
+        a.frame()
+        vb = a.geo["vbar"]
+        p, q = (vb[0] + 3, vb[1] + 10), (vb[0] + 3, vb[1] + vb[3] - 2)
+        a.frame([down(p)])
+        a.frame([move(q)])
+        a.frame([up(q)])
+        self.assertEqual(a.stack.scroll, a.stack.max_scroll(a.geo["grid"][3]))
+
+    def test_the_view_buttons_and_tab_switch_between_the_three_views(self):
+        a = self.a
+        a.frame([key(pygame.K_TAB)])
+        self.assertEqual(a.mode, "roll")
+        self.assertEqual(a.prefs.view, "roll")
+        self.assertGreater(a.layout.left[2], 0)                    # the voices panel is back
+        a.frame([key(pygame.K_TAB)])
+        self.assertEqual(a.mode, "tracker")
+        a.frame([key(pygame.K_TAB)])
+        self.assertEqual(a.mode, "stack")
+
+    def test_the_picked_voice_stays_picked_when_the_view_changes(self):
+        a = self.a
+        a.sel_voice = 2
+        a.set_mode("roll")
+        self.assertEqual(a.sel_voice, 2)
+        a.set_mode("stack")
+        self.assertEqual(a.sel_voice, 2)
+
+    def test_the_marquee_selects_in_the_picked_lane(self):
+        a = self.a
+        a.sel_voice = 0
+        mods = {"ctrl": pygame.KMOD_CTRL}
+        real = pygame.key.get_mods
+        try:
+            pygame.key.get_mods = lambda: mods["ctrl"]
+            p = self.lane_pt(0, 0, frac=0.02)
+            q = (int(a.view.x_of(a.roll.length, a.geo["grid"][0])), a.geo["grid"][1] + a.stack.height - 2)
+            a.frame([down(p)])
+            a.frame([move(q)])
+            a.frame([up(q)])
+        finally:
+            pygame.key.get_mods = real
+        self.assertEqual(len(a.selection()), len(a.roll.notes[0]))

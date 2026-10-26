@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from .model import LOW, HIGH
 
 MIN_H, MAX_H, DEFAULT_H = 56, 400, 96          # track height limits and default, in pixels at UI scale 1
-MIN_SPAN = 24                                  # a lane never shows fewer than two octaves
+MIN_SPAN = 12                                  # a lane never shows fewer than one octave
+PAD = 2                                        # semitones of room above and below a track's own notes
 
 
 def clamp_height(h):
@@ -44,11 +45,12 @@ class Stack:
     def clamp(self, area_h):
         self.scroll = max(0, min(int(self.scroll), self.max_scroll(area_h)))
 
-    def set_height(self, h, area_h, keep_track=None):
-        """Change the track height; keep `keep_track` (default: the one at the top edge) where it was."""
+    def set_height(self, h, area_h, keep_track=None, limit=True):
+        """Change the track height; keep `keep_track` (default: the one at the top edge) where it was.  `limit` False
+        takes `h` as it is (the caller has scaled it for the window's UI scale and limited it before)."""
         top = self.scroll // self.height if keep_track is None else keep_track
         offset = self.scroll - top * self.height if keep_track is None else 0
-        self.height = clamp_height(h)
+        self.height = clamp_height(h) if limit else max(1, int(h))
         if keep_track is None:
             self.scroll = top * self.height + min(offset, self.height - 1)
         else:
@@ -94,12 +96,12 @@ class Stack:
 
     def window(self, i, roll):
         """(low, high), both included, of the pitches lane `i` shows: the user's pinned window, else the track's own
-        notes with three semitones of room, at least MIN_SPAN wide and kept inside C0..B8."""
+        notes with PAD semitones of room, at least MIN_SPAN wide and kept inside C0..B8."""
         if i in self.pinned:
             return self.pinned[i]
         notes = roll.notes[i] if i < len(roll.notes) else []
         if notes:
-            low, high = min(n.pitch for n in notes) - 3, max(n.pitch for n in notes) + 3
+            low, high = min(n.pitch for n in notes) - PAD, max(n.pitch for n in notes) + PAD
         else:
             low, high = roll.low, roll.high
         if high - low + 1 < MIN_SPAN:
