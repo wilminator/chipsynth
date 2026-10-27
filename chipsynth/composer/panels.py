@@ -13,7 +13,7 @@ from chipsynth.synth import ATTACK_MS, DECAY_MS, WAVES
 from . import layout as L, model as M, tracker as TR
 from .ui import mix, rrect, text
 
-VIEW_ROLL, VIEW_TRACKER = "Piano roll", "Tracker"
+VIEW_STACK, VIEW_ROLL, VIEW_TRACKER = "Tracks", "Piano roll", "Tracker"
 
 
 def draw(app):
@@ -29,10 +29,16 @@ def draw(app):
         ui.click, ui.pos = None, (-1, -1)
     clip(surf, lay.top)
     topbar(app)
-    clip(surf, lay.left)
-    voices(app)
+    if lay.left[2] > 0:
+        clip(surf, lay.left)
+        voices(app)
     clip(surf, lay.center)
-    tracker(app) if app.mode == "tracker" and app.roll is not None else roll(app)
+    if app.mode == "tracker" and app.roll is not None:
+        tracker(app)
+    elif app.mode == "stack":
+        stack(app)
+    else:
+        roll(app)
     clip(surf, lay.right)
     inspector(app)
     clip(surf, lay.bottom)
@@ -63,6 +69,8 @@ def panel_bg(app, rect, color=None):
 def splitters(app):
     surf, th, lay = app.screen, app.th, app.layout
     for name in ("split_left", "split_right", "split_bottom"):
+        if name == "split_left" and app.mode == "stack":
+            continue                                       # no left panel in the track view
         r = getattr(lay, name)
         hot = app.ui.hover(r) or (app.drag and app.drag["kind"] == name)
         surf.fill(th["accent"] if hot else th["line"], r)
@@ -141,11 +149,14 @@ def topbar(app):
     limit = left_end + int(190 * s)
     items = []
     sq = bh
-    items.append(("view", [(VIEW_ROLL, width(VIEW_ROLL), app.mode == "roll"), (VIEW_TRACKER, width(VIEW_TRACKER), app.mode == "tracker")]))
+    items.append(("view", [(VIEW_STACK, width(VIEW_STACK), app.mode == "stack"), (VIEW_ROLL, width(VIEW_ROLL), app.mode == "roll"),
+                           (VIEW_TRACKER, width(VIEW_TRACKER), app.mode == "tracker")]))
     items.append(("theme", width("Light" if app.prefs.dark else "Dark")))
     items.append(("font", (sq, sq)))
     items.append(("hz", (sq, sq)))
     items.append(("vz", (sq, sq)))
+    if app.mode == "stack":
+        items.append(("tz", (sq, sq)))
     for kind, spec in items:
         if kind == "view":
             need = sum(wd for _, wd, _ in spec) + gap
@@ -154,9 +165,10 @@ def topbar(app):
             x2 = right - need + gap
             for name, wd, active in spec:
                 rect = (x2, y, wd, bh)
-                tip = "Time across the page: the piano roll" if name == VIEW_ROLL else "Time down the page: the tracker grid (Tab)"
+                tip = {VIEW_STACK: "All the tracks, one lane each, scrolling down the page (Tab changes view)",
+                       VIEW_ROLL: "One big piano roll for all the voices", VIEW_TRACKER: "Time down the page: the tracker grid"}[name]
                 if ui.button(surf, th, f, rect, name, tip, on=active):
-                    app.set_mode("roll" if name == VIEW_ROLL else "tracker")
+                    app.set_mode({VIEW_STACK: "stack", VIEW_ROLL: "roll", VIEW_TRACKER: "tracker"}[name])
                 x2 += wd
             right -= need + gap
         elif kind == "theme":
@@ -169,7 +181,7 @@ def topbar(app):
                 app.dirty = True
             right -= need + gap
         else:
-            label = {"font": "Aa", "hz": "H", "vz": "V"}[kind]
+            label = {"font": "Aa", "hz": "H", "vz": "V", "tz": "T"}[kind]
             lw = f.small.size(label)[0] + 4
             need = lw + 2 * sq + gap
             if right - need < limit:
@@ -179,7 +191,8 @@ def topbar(app):
             x2 += lw
             tips = {"font": ("Smaller text (Ctrl -)", "Larger text (Ctrl +)"),
                     "hz": ("Zoom out horizontally (-)", "Zoom in horizontally (+)"),
-                    "vz": ("Shrink the rows", "Taller rows (Ctrl+Shift+wheel)")}[kind]
+                    "vz": ("Shrink the rows", "Taller rows (Ctrl+Shift+wheel)"),
+                    "tz": ("Shorter tracks (Ctrl+Shift+wheel)", "Taller tracks (Ctrl+Shift+wheel)")}[kind]
             if ui.button(surf, th, f, (x2, y, sq, sq), "−", tips[0]):
                 step(app, kind, -1)
             if ui.button(surf, th, f, (x2 + sq, y, sq, sq), "+", tips[1]):
@@ -202,6 +215,8 @@ def step(app, kind, d):
         app.zoom_h_center(1.25 if d > 0 else 0.8)
     elif kind == "vz" and app.roll:
         app.zoom_v_center(1.2 if d > 0 else 1 / 1.2)
+    elif kind == "tz":
+        app.set_track_h(app.prefs.track_h + 12 * d)
     app.dirty = True
 
 
@@ -395,9 +410,16 @@ def draw_grid(app):
         if p % 12 == 0:
             pygame.draw.line(surf, th["bar"], (gx, y + v.row), (gx + gw, y + v.row))
         p -= 1
+    time_lines(app, (gx, gy, gw, gh))
+
+
+def time_lines(app, rect):
+    """Over a lane's rows: the shading past the end and over the loop, bar lines and beat lines."""
+    surf, th, v, rl = app.screen, app.th, app.view, app.roll
+    gx, gy, gw, gh = rect
     end_x = v.x_of(rl.length, gx)
     if end_x < gx + gw:
-        surf.fill(th["past"], (max(gx, end_x), gy, gx + gw - max(gx, end_x), gh))
+        surf.fill(th["past"], (max(gx, end_x), gy, gw - (max(gx, end_x) - gx), gh))
     if rl.loop_tick > 0:
         lx = max(gx, v.x_of(rl.loop_tick, gx))
         ex = min(gx + gw, end_x)
@@ -1246,14 +1268,14 @@ def new_overlay(app):
 HELP = (
     ("Space", "play / stop"), ("Home", "back to the start"), ("L", "loop on / off"), ("F", "follow the playhead"),
     ("1 - 6", "pick a voice (V1-V4, D1, D2)"), ("M / S", "mute / solo the picked voice"),
-    ("Wheel", "scroll up and down"), ("Shift+wheel", "scroll along the song"),
-    ("Ctrl+wheel", "zoom along the song"), ("Ctrl+Shift+wheel", "zoom the rows"),
+    ("Wheel", "scroll up and down (Tracks: scroll the track list)"), ("Shift+wheel", "scroll along the song"),
+    ("Ctrl+wheel", "zoom along the song"), ("Ctrl+Shift+wheel", "zoom the rows (Tracks: change the track height)"),
     ("+ / -", "zoom along the song"), ("Ctrl + / -", "larger / smaller text"),
-    ("Arrows", "scroll (Shift for bigger steps)"), ("Middle drag", "pan"),
+    ("Arrows", "scroll (Shift for bigger steps); in Tracks, Up / Down pick the track above / below"), ("Middle drag", "pan"),
     ("Tracker keys", "z s x d c v ... and q 2 w 3 e ... are a piano; - / + octave"),
     ("Tracker , / .", "volume of the note at the cursor, down / up (Shift: by 4)"),
     ("Tracker ; / :", "effect of the note at the cursor: next / previous (~ vibrato, / slide, ^ arpeggio)"),
-    ("Tab", "switch between the piano roll and the tracker"),
+    ("Tab", "switch between Tracks, the piano roll and the tracker"),
     ("Click ruler", "set where Play starts"), ("Click a note", "select it (the inspector shows it)"),
     ("Click empty", "add a note (drag to set its length)"),
     ("Shift+click", "add a note to the selection"), ("Ctrl+drag", "box-select notes of the picked voice (Shift adds)"),
@@ -1289,4 +1311,200 @@ def help_overlay(app):
             text(surf, f.mono, k, (x, y), th["accent"], "tl", int(170 * s) - 8)
             text(surf, f.ui, d, (x + int(170 * s), y), th["text"], "tl", colw - int(190 * s))
             y += step
+    surf.set_clip(None)
+
+
+# ------------------------------------------------------------------ the track stack
+def stack(app):
+    """Every track as a lane of the same height, stacked and scrolled vertically."""
+    surf, th, f = app.screen, app.th, app.fonts
+    panel_bg(app, app.layout.center, th["bg"])
+    if app.roll is None:
+        c = app.layout.center
+        text(surf, f.ui, "No song open.  Press Songs, or drop a .mml / .csp file here.",
+             (c[0] + c[2] // 2, c[1] + c[3] // 2), th["dim"], "mc")
+        return
+    gx, gy, gw, gh = app.geo["grid"]
+    for i, top in app.stack.visible(gh):
+        stack_lane(app, i, gy + top)
+    stack_ghost(app)
+    stack_heads(app)
+    draw_ruler(app)
+    stack_playhead(app)
+    scrollbar(app, "h")
+    scrollbar(app, "v")
+
+
+def stack_lane(app, i, y0):
+    """One lane: its rows, the time lines, its notes (or drum hits) and a line under it.  `y0` is its top edge."""
+    surf, th, v, rl, st = app.screen, app.th, app.view, app.roll, app.stack
+    gx, gy, gw, gh = app.geo["grid"]
+    h = st.height
+    lane = pygame.Rect(gx, y0, gw, h).clip(pygame.Rect(app.geo["grid"]))
+    if lane.h <= 0:
+        return
+    clip(surf, lane)
+    if st.is_melodic(i):
+        low, high = st.window(i, rl)
+        row = st.row_px(i, rl)
+        for p in range(high, low - 1, -1):
+            y = y0 + (high - p) * row
+            pygame.draw.rect(surf, th["black_row"] if M.is_black(p) else th["white_row"], (gx, y, gw, row + 1))
+            if app.guide is not None:
+                tonic, name = app.guide
+                if (p - tonic) % 12 in SCALES.get(name, ()):
+                    shade = pygame.Surface((int(gw), max(1, int(row) + 1)), pygame.SRCALPHA)
+                    shade.fill(th["accent"] + (70 if (p - tonic) % 12 == 0 else 30,))
+                    surf.blit(shade, (gx, y))
+            if p % 12 == 0 and row >= 3:
+                pygame.draw.line(surf, th["bar"], (gx, y + row), (gx + gw, y + row))
+        time_lines(app, (gx, y0, gw, h))
+        stack_notes(app, i, y0, row)
+    else:
+        surf.fill(th["white_row"] if i % 2 == 0 else th["black_row"], (gx, y0, gw, h))
+        time_lines(app, (gx, y0, gw, h))
+        stack_hits(app, i, y0)
+    pygame.draw.line(surf, th["line"], (gx, y0 + h - 1), (gx + gw, y0 + h - 1))
+    if i == app.sel_voice:
+        pygame.draw.rect(surf, th["accent"], (gx, y0, gw, h), 1)
+
+
+def stack_notes(app, i, y0, row):
+    surf, th, v, rl, f = app.screen, app.th, app.view, app.roll, app.fonts
+    gx, gy, gw, gh = app.geo["grid"]
+    t0, t1 = v.scroll_tick, v.scroll_tick + gw / v.ppt
+    low, high = app.stack.window(i, rl)
+    col = note_color(app, i)
+    edge = mix(col, (0, 0, 0), 0.4)
+    for idx, n in enumerate(rl.notes[i]):
+        if n.start + n.dur < t0 or n.start > t1 or not low <= n.pitch <= high:
+            continue
+        x = v.x_of(n.start, gx)
+        w = max(2.0, n.dur * v.ppt - 1)
+        y = y0 + (high - n.pitch) * row
+        rect = pygame.Rect(int(x), int(y) + (1 if row >= 4 else 0), int(w), int(max(2, row - (2 if row >= 4 else 0))))
+        pygame.draw.rect(surf, col, rect, border_radius=2 if row >= 4 else 0)
+        if row >= 4:
+            pygame.draw.rect(surf, edge, rect, 1, border_radius=2)
+        if app.note_sel == (i, idx):
+            pygame.draw.rect(surf, th["text"], rect.inflate(2, 2), 2, border_radius=3)
+        elif (i, n.start) in app.multi:
+            pygame.draw.rect(surf, th["accent"], rect.inflate(2, 2), 2, border_radius=3)
+        elif app.note_hover == (i, idx):
+            pygame.draw.rect(surf, mix(col, (255, 255, 255), 0.6), rect.inflate(2, 2), 1, border_radius=3)
+        if rect.h >= 13 and rect.w > f.small.size("C#4")[0] + 8:
+            text(surf, f.small, M.pitch_name(n.pitch), (rect.x + 4, rect.centery), th["accent_text"]
+                 if sum(col) > 380 else (255, 255, 255), "ml")
+
+
+def stack_hits(app, i, y0):
+    """The drum hits of lane `i` (4 = D1, 5 = D2)."""
+    surf, th, v, rl, f = app.screen, app.th, app.view, app.roll, app.fonts
+    gx, gy, gw, gh = app.geo["grid"]
+    t0, t1 = v.scroll_tick, v.scroll_tick + gw / v.ppt
+    col = note_color(app, i)
+    h = app.stack.height
+    pad = max(2, h // 8)
+    for b in rl.dac[i - 4]:
+        if b.start + b.dur < t0 or b.start > t1:
+            continue
+        rect = pygame.Rect(int(v.x_of(b.start, gx)), int(y0 + pad), int(max(3.0, b.dur * v.ppt - 1)), int(h - 2 * pad))
+        pygame.draw.rect(surf, col, rect, border_radius=3)
+        if app.hit_sel == (i, b.start):
+            pygame.draw.rect(surf, th["text"], rect.inflate(2, 2), 2, border_radius=4)
+        if rect.w > 22:
+            text(surf, f.small, b.name, (rect.x + 4, rect.centery), th["accent_text"] if sum(col) > 380 else (255, 255, 255),
+                 "ml", rect.w - 6)
+
+
+def stack_ghost(app):
+    """The note or hit being placed, moved or sized by the mouse, in its own lane."""
+    draw_marquee(app)
+    d = app.drag
+    if not d or not d.get("moved", True):
+        return
+    surf, th, v, st = app.screen, app.th, app.view, app.stack
+    gx, gy, gw, gh = app.geo["grid"]
+    clip(surf, app.geo["grid"])
+    if d["kind"] in ("new", "move", "resize"):
+        i = d["voice"]
+        start, dur, pitch = (d["start"], d["dur"], d["pitch"]) if d["kind"] == "new" else d["new"]
+        row = st.row_px(i, app.roll)
+        low, high = st.window(i, app.roll)
+        pitch = max(low, min(high, pitch))
+        rect = pygame.Rect(int(v.x_of(start, gx)), int(gy + st.y_of(i, pitch, app.roll) + 1), int(max(3, dur * v.ppt - 1)),
+                           int(max(3, row - 2)))
+        col = note_color(app, i)
+    elif d["kind"] in ("hit_new", "hit_move"):
+        i = d["lane"]
+        w = app.snap_ticks if d["kind"] == "hit_new" else next(
+            (b.dur for b in app.roll.dac[i - 4] if b.start == d["start"]), app.snap_ticks)
+        pad = max(2, st.height // 8)
+        rect = pygame.Rect(int(v.x_of(d["new"], gx)), int(gy + st.top_of(i) + pad), int(max(3, w * v.ppt - 1)),
+                           int(st.height - 2 * pad))
+        col = note_color(app, i)
+    else:
+        return
+    shade = pygame.Surface(rect.size, pygame.SRCALPHA)
+    shade.fill(col + (120,))
+    surf.blit(shade, rect.topleft)
+    pygame.draw.rect(surf, th["text"], rect, 2, border_radius=3)
+    surf.set_clip(None)
+
+
+def stack_heads(app):
+    """The header column: one card per visible track with its name, instrument, note count and Mute / Solo."""
+    surf, th, f, ui, s, st = app.screen, app.th, app.fonts, app.ui, app.scale, app.stack
+    hx, hy, hw, hh = app.geo["heads"]
+    clip(surf, app.geo["heads"])
+    surf.fill(th["panel"], app.geo["heads"])
+    muted = app.muted_now() if app.tune else set()
+    counts = app.roll.counts()
+    app.voice_cards = [None] * st.count
+    for i, top in st.visible(hh):
+        rect = pygame.Rect(hx + 3, hy + top + 2, hw - 7, st.height - 4)
+        app.voice_cards[i] = tuple(rect)
+        sel = i == app.sel_voice
+        col = th["voices"][i]
+        dead = i in muted or counts[i] == 0
+        rrect(surf, th["panel2"] if not sel else mix(th["panel2"], th["accent"], 0.18), tuple(rect), 6,
+              th["accent"] if sel else th["line"])
+        pygame.draw.rect(surf, col if not dead else mix(col, th["panel2"], 0.65),
+                         (rect.x + 1, rect.y + 6, max(4, int(5 * s)), max(4, rect.h - 12)), border_radius=3)
+        tx = rect.x + int(16 * s)
+        text(surf, f.bold, VOICE_LABEL[i], (tx, rect.y + int(6 * s)), th["text"] if not dead else th["dim"])
+        bw = int(f.line * 1.25)
+        bx = rect.right - 2 * bw - int(10 * s)
+        by = rect.y + int(6 * s)
+        buttons_ok = by + bw <= hy + hh and by >= hy
+        if buttons_ok:
+            if ui.button(surf, th, f, (bx, by, bw, bw), "M", "Mute %s (M)" % VOICE_LABEL[i], on=i in app.muted, font=f.small):
+                app.toggle_mute(i)
+            if ui.button(surf, th, f, (bx + bw + int(4 * s), by, bw, bw), "S", "Solo %s" % VOICE_LABEL[i], on=i in app.solos,
+                         font=f.small):
+                app.toggle_solo(i)
+        if ui.clicked(tuple(rect)) and not (buttons_ok and ui.hover((bx, by, 2 * bw + int(4 * s), bw))):
+            app.sel_voice = i
+        if st.height >= int(f.line * 2.6):
+            if i < 4:
+                inst = voice_inst(app, i)
+                sub = "%s   %d notes" % (inst, counts[i]) if counts[i] else "empty"
+            else:
+                sub = "%d samples" % counts[i] if counts[i] else "empty"
+            text(surf, f.small, sub, (tx, rect.y + int(6 * s) + f.line), th["dim"], "tl", rect.w - int(24 * s))
+    pygame.draw.line(surf, th["line"], (hx + hw - 1, hy), (hx + hw - 1, hy + hh))
+
+
+def stack_playhead(app):
+    tick = app.playhead()
+    if tick is None:
+        return
+    surf, th, v = app.screen, app.th, app.view
+    gx, gy, gw, gh = app.geo["grid"]
+    x = v.x_of(tick, gx)
+    if x < gx or x > gx + gw:
+        return
+    top = app.geo["ruler"][1]
+    surf.set_clip(pygame.Rect(gx, top, gw, gy + gh - top))
+    pygame.draw.line(surf, th["accent"], (x, top), (x, gy + gh), 2)
     surf.set_clip(None)

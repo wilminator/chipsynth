@@ -40,19 +40,19 @@ class Layout:
     too_small: bool = False
 
 
-def compute(width, height, panels, scale=1.0, bar=None):
+def compute(width, height, panels, scale=1.0, bar=None, hide_left=False):
     """The rectangles for a window of width x height.  `scale` is the font-size scale (1.0 = 15 px text);
     `bar` the top bar height in pixels (default from the scale)."""
     bar = bar or int(round(46 * scale))
     sp = max(4, int(round(SPLIT * scale)))
     # clamp the user's panel sizes so the centre keeps room
-    left = int(round(max(panels.LEFT[0], min(panels.left, panels.LEFT[1])) * scale))
+    left = 0 if hide_left else int(round(max(panels.LEFT[0], min(panels.left, panels.LEFT[1])) * scale))
     right = int(round(max(panels.RIGHT[0], min(panels.right, panels.RIGHT[1])) * scale))
     bottom = int(round(max(panels.BOTTOM[0], min(panels.bottom, panels.BOTTOM[1])) * scale))
     min_center = int(round(320 * scale))
     over = left + right + 2 * sp + min_center - width
     if over > 0:
-        cut = min(over, max(0, left - int(150 * scale)))
+        cut = min(over, max(0, left - (0 if hide_left else int(150 * scale))))
         left -= cut
         over -= cut
         right -= min(over, max(0, right - int(200 * scale)))
@@ -104,3 +104,22 @@ def roll_rects(center, line):
         dac0=(grid_x, lanes_y, grid_w, dac), dac1=(grid_x, lanes_y + dac, grid_w, dac),
         vel=(grid_x, lanes_y + 2 * dac, grid_w, vel), lane_names=(x, lanes_y, keys_w, lanes_h),
         hbar=(grid_x, y + h - sb, grid_w, sb))
+
+
+def stack_rects(center, line):
+    """The pieces of the track-stack area: ruler, the header column, the lanes (`grid`, as in the roll, so code that
+    needs "the place notes are drawn" works for both) and the two scroll bars.  The roll's lanes under the grid
+    (`vel`, `dac0`, `dac1`, ...) are empty rectangles here."""
+    x, y, w, h = center
+    ruler_h = int(line * 1.7)
+    head_w = int(line * 9.5)
+    sb = max(11, int(line * 0.8))
+    grid_x, grid_w = x + head_w, max(0, w - head_w - sb)
+    grid_y = y + ruler_h
+    grid_h = max(0, h - ruler_h - sb)
+    none = (0, 0, 0, 0)
+    return dict(
+        ruler=(grid_x, y, grid_w, ruler_h), corner=(x, y, head_w, ruler_h),
+        heads=(x, grid_y, head_w, grid_h), keys=none, grid=(grid_x, grid_y, grid_w, grid_h),
+        vbar=(x + w - sb, grid_y, sb, grid_h), hbar=(grid_x, y + h - sb, grid_w, sb),
+        dac0=none, dac1=none, vel=none, lane_names=none)
