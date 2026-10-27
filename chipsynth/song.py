@@ -24,7 +24,12 @@ from dataclasses import dataclass, field, replace
 from . import mml
 from .mml import MMLError, TICKS_WHOLE, LETTER
 
-TRACKS = ("V1", "V2", "V3", "V4", "D1", "D2")
+TRACKS = ("V1", "V2", "V3", "V4", "D1", "D2")      # the default layout: 4 voices and 2 DACs
+
+
+def track_names(voices=4, dacs=2):
+    """("V1".."Vn", "D1".."Dm"): the tracks of a song with that many voices and DACs."""
+    return tuple("V%d" % i for i in range(1, voices + 1)) + tuple("D%d" % i for i in range(1, dacs + 1))
 
 
 class SongError(Exception):
@@ -215,9 +220,18 @@ class Piece:
 @dataclass
 class Trace:
     """What `Song.compile(trace=...)` learned about where the tune came from (the composer edits through it)."""
-    pieces: list = field(default_factory=lambda: [[] for _ in range(6)])     # per voice V1-V4, D1, D2, in time order
-    ends: list = field(default_factory=lambda: [0] * 6)                      # tick where each voice's events end
-    final: list = field(default_factory=lambda: [(4, 0, None)] * 6)          # each voice's final state
+    lanes: int = 6                                    # tracks in the song: its voices, then its DACs
+    pieces: list = None                               # per track (V1.., then D1..), in time order
+    ends: list = None                                 # tick where each track's events end
+    final: list = None                                # each track's final state
+
+    def __post_init__(self):
+        if self.pieces is None:
+            self.pieces = [[] for _ in range(self.lanes)]
+        if self.ends is None:
+            self.ends = [0] * self.lanes
+        if self.final is None:
+            self.final = [(4, 0, None)] * self.lanes
 
     def groups(self, voice):
         """{id(compiled note): [its pieces]} for one voice."""
@@ -244,13 +258,19 @@ class Song:
     keys: dict = field(default_factory=dict)          # name -> scale steps
     samples: dict = field(default_factory=dict)       # name -> (file, rate or None)
     clips: dict = field(default_factory=dict)         # name -> Clip
-    tracks: dict = field(default_factory=dict)        # "V1".."V4", "D1", "D2" -> [events]
+    voices: int = 4                                   # how many V tracks (1-16)
+    dacs: int = 2                                     # how many D tracks (0-8)
+    tracks: dict = field(default_factory=dict)        # "V1".."Vn", "D1".."Dm" -> [events]
     notes: list = field(default_factory=list)         # comment lines above the header
     footer: list = field(default_factory=list)        # comment lines after the last track
     warnings: list = field(default_factory=list)      # what the importer noticed (not saved)
 
+    @property
+    def names(self):
+        return track_names(self.voices, self.dacs)
+
     def __post_init__(self):
-        for name in TRACKS:
+        for name in self.names:
             self.tracks.setdefault(name, [])
 
     @classmethod
@@ -281,6 +301,8 @@ class _Compiler:
         self.stack = []
         p = self.p = mml._Parser("", lib)
         t = p.tune
+        t.nvoices, t.ndacs = song.voices, song.dacs
+        p.make_voices()
         t.title, t.author, t.comment = song.title, song.author, song.comment
         t.bpm, t.time, t.detune, t.once = song.bpm, tuple(song.time), song.detune, song.once
         t.echo, t.reverb = song.echo, song.reverb
@@ -292,13 +314,14 @@ class _Compiler:
 
     def run(self):
         p = self.p
-        for k, name in enumerate(TRACKS):
-            v = p.voices[k] if k < 4 else p.dvoices[k - 4]
+        nv = self.song.voices
+        for k, name in enumerate(self.song.names):
+            v = p.voices[k] if k < nv else p.dvoices[k - nv]
             self.lane = k
             self.play(v, self.song.tracks.get(name, ()), 0)
         if self.trace is not None:
-            for i in range(6):
-                v = p.voices[i] if i < 4 else p.dvoices[i - 4]
+            for i in range(nv + self.song.dacs):
+                v = p.voices[i] if i < nv else p.dvoices[i - nv]
                 self.trace.ends[i] = v.pos
                 self.trace.final[i] = (v.octave, v.boundary, v.key)
         return p.finish()

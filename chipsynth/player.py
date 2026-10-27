@@ -24,7 +24,7 @@ class TunePlayer:
         self.tune = tune
         self.loop = loop and not tune.once
         self.volume = volume
-        self.synth = Synth()
+        self.synth = Synth(len(tune.voices), len(tune.dac))
         if tune.echo or tune.reverb:
             from .synthfx import Bus, Echo, Reverb
             self.synth.bus = Bus(Echo(*tune.echo) if tune.echo else None, Reverb(tune.reverb) if tune.reverb else None)

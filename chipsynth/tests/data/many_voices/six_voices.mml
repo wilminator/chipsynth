@@ -1,0 +1,21 @@
+// a test song with 6 voices and 3 DACs (header lines: voices, dacs); samples are in ./samples
+title Six voices
+author chipsynth test data
+tempo 120
+time 4/4
+voices 6
+dacs 3
+
+[sample]
+kick = kit_kick
+snare = kit_snare
+
+V1: l8 o4 c e g > c < g e c r
+V2: l8 o3 e g > c e < c g e r
+V3: l8 o3 g > c e g < e c g r
+V4: l8 o2 c r c r c r c r
+V5: l4 o5 e g e g
+V6: l4 o5 c e c e
+D1: kick8 r8 kick8 r8 kick8 r8 kick8 r8
+D2: r4 snare4 r4 snare4
+D3: kick16 kick16 r8 r4 r2

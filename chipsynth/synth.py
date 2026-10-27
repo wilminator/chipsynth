@@ -23,7 +23,8 @@ import numpy as np
 from scipy.signal import lfilter
 
 RATE = 44100
-VOICES, DACS = 4, 2
+VOICES, DACS = 4, 2             # the defaults: a Synth may be made with other counts
+MAX_VOICES, MAX_DACS = 16, 8
 WAVES = ("pulse", "saw", "tri", "sine", "noise")
 
 # SID attack times and (3x as long) decay / release times, in ms, for the rates 0-15
@@ -365,9 +366,11 @@ class _Dac:
 
 
 class Synth:
-    def __init__(self):
-        self.voices = [_Voice() for _ in range(VOICES)]
-        self.dacs = [_Dac() for _ in range(DACS)]
+    def __init__(self, voices=VOICES, dacs=DACS):
+        if not 1 <= voices <= MAX_VOICES or not 0 <= dacs <= MAX_DACS:
+            raise ValueError("voices must be 1-%d and DACs 0-%d" % (MAX_VOICES, MAX_DACS))
+        self.voices = [_Voice() for _ in range(voices)]
+        self.dacs = [_Dac() for _ in range(dacs)]
         self.t = 0                       # samples rendered so far
         self._events = []
         self._seq = itertools.count()
