@@ -13,21 +13,46 @@ from .player import TunePlayer
 from .synth import RATE, to_pcm16
 
 # ------------------------------------------------------------------ playing
+LAST_MIXER_ERROR = ""           # why the last open_music_mixer() gave up ("" if it did not)
+
+
 def open_music_mixer():
-    """pygame.mixer at 44.1 kHz stereo 16-bit with channel 0 kept for the music; None if unavailable."""
+    """pygame.mixer at 44.1 kHz stereo 16-bit with channel 0 kept for the music; None if unavailable.
+
+    On Windows, SDL's default WASAPI driver can refuse a device that DirectSound opens fine, so a failed first
+    try is repeated with DirectSound (unless SDL_AUDIODRIVER was set by the user).  The reason is kept in
+    LAST_MIXER_ERROR."""
+    global LAST_MIXER_ERROR
+    LAST_MIXER_ERROR = ""
     try:
         import pygame
-        init = pygame.mixer.get_init()
-        if init and (init[0] != RATE or init[2] != 2):
-            pygame.mixer.quit()
-            init = None
-        if not init:
-            pygame.mixer.init(frequency=RATE, size=-16, channels=2, buffer=1024)
-        pygame.mixer.set_num_channels(max(8, pygame.mixer.get_num_channels()))
-        pygame.mixer.set_reserved(1)
-        return pygame.mixer
-    except Exception:
+    except Exception as e:
+        LAST_MIXER_ERROR = "pygame is not available (%s)" % e
         return None
+    import os
+    import sys
+    tried = [None]
+    if sys.platform == "win32" and not os.environ.get("SDL_AUDIODRIVER"):
+        tried.append("directsound")
+    for driver in tried:
+        try:
+            if driver:
+                pygame.mixer.quit()
+                os.environ["SDL_AUDIODRIVER"] = driver
+            init = pygame.mixer.get_init()
+            if init and (init[0] != RATE or init[2] != 2):
+                pygame.mixer.quit()
+                init = None
+            if not init:
+                pygame.mixer.init(frequency=RATE, size=-16, channels=2, buffer=1024)
+            pygame.mixer.set_num_channels(max(8, pygame.mixer.get_num_channels()))
+            pygame.mixer.set_reserved(1)
+            return pygame.mixer
+        except Exception as e:
+            LAST_MIXER_ERROR = "%s%s" % (e or type(e).__name__, " (driver %s)" % driver if driver else "")
+            if driver:
+                os.environ.pop("SDL_AUDIODRIVER", None)
+    return None
 
 
 SLEW = 0.12                     # most the volume may move per chunk: ducking and volume changes ramp
@@ -56,7 +81,7 @@ class MusicOut:
         self._stop = threading.Event()
         self._fade_out = 0.0
         self._old = None
-        self.note = "" if self.mixer else "No audio device: music is silent."
+        self.note = "" if self.mixer else "No audio device: music is silent." + (" (%s)" % LAST_MIXER_ERROR if LAST_MIXER_ERROR else "")
         self.volume = 1.0
 
     @property
