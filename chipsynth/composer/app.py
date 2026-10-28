@@ -153,6 +153,7 @@ class Composer:
         self.roll = M.Roll.from_tune(tune, self.inst_name)
         self.stack.names = self.roll.names
         self.stack.pinned = {k: v for k, v in self.stack.pinned.items() if k < self.roll.nv}
+        self.relayout()                      # opened from a click while drawing: the lanes below must match at once
         self.muted, self.solos = set(), set()
         self.note_sel = self.note_hover = None
         self.hit_sel = None
@@ -311,9 +312,8 @@ class Composer:
         return M.source_tick(self.tune, self.seek_tick, ticks)
 
     # ------------------------------------------------------------ frame
-    def update(self):
-        if self.playing and not self.out.playing:
-            self.playing = False                       # a once-only tune (or no loop) ran out
+    def relayout(self):
+        """Panel and lane rectangles for the window, the mode and the song's track count."""
         size = self.screen.get_size()
         self.layout = L.compute(*size, self.prefs.panels, self.scale, hide_left=self.mode == "stack")
         if self.mode == "stack":
@@ -321,6 +321,11 @@ class Composer:
             self.sync_stack()
         else:
             self.geo = L.roll_rects(self.layout.center, self.fonts.line, self.roll.nd if self.roll else 2)
+
+    def update(self):
+        if self.playing and not self.out.playing:
+            self.playing = False                       # a once-only tune (or no loop) ran out
+        self.relayout()
         if self.roll:
             self.clamp_view()
             tick = self.playhead()
@@ -776,6 +781,7 @@ class Composer:
         self.tune = self.ed.tune
         self.roll = M.Roll.from_tune(self.tune, self.inst_name)
         self.stack.names = self.roll.names
+        self.relayout()                      # a click while drawing may have changed the song's track count
         self.note_hover = None
         self.note_sel = None
         hs, self.hit_sel = self.hit_sel, None

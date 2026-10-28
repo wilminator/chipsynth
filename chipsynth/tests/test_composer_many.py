@@ -139,3 +139,23 @@ class WindowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StaleGeometryTests(unittest.TestCase):
+    def test_opening_a_bigger_song_between_update_and_draw_does_not_crash(self):
+        """A click inside a frame (the Songs list) loads a song after update() laid the window out for the old one."""
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        for view in ("roll", "stack", "tracker"):
+            a = Composer(screen, Prefs(view=view), prefs_path=d / "prefs.json", root=d)
+            a.frame()
+            a.load_song(Song.from_mml("V1: c\nD1: r4\n"), "Plain", source=str(d / "p.mml"))
+            a.frame()
+            a.load_song(Song.from_mml((DATA / "six_voices.mml").read_text(), lib()), "Six", source=str(d / "t.mml"))
+            panels.draw(a)                                       # no update() in between
+            a.ui.begin()
+            panels.draw(a)
+            a.ui.end()
+            a.load_song(Song.from_mml("V1: c\n"), "Plain", source=str(d / "p.mml"))
+            panels.draw(a)
