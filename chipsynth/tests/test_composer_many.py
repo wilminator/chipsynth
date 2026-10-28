@@ -159,3 +159,22 @@ class StaleGeometryTests(unittest.TestCase):
             a.ui.end()
             a.load_song(Song.from_mml("V1: c\n"), "Plain", source=str(d / "p.mml"))
             panels.draw(a)
+
+
+class LayoutGuardTests(unittest.TestCase):
+    def test_drawing_after_the_mode_or_song_changed_behind_update_does_not_crash(self):
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        a = Composer(screen, Prefs(view="roll"), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        a.load_song(Song.from_mml((DATA / "six_voices.mml").read_text(), lib()), "Six", source=str(d / "t.mml"))
+        a.frame()
+        for mode in ("stack", "tracker", "roll", "stack"):
+            a.mode = mode                                        # changed without going through set_mode
+            panels.draw(a)
+        a.roll = M.Roll.from_tune(mml.parse("V1: c"), None)      # and a song with fewer tracks, with no layout at all
+        a.mode = "roll"
+        panels.draw(a)
+        a.set_mode("stack")
+        self.assertIn("heads", a.geo)

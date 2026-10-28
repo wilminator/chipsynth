@@ -312,9 +312,20 @@ class Composer:
         return M.source_tick(self.tune, self.seek_tick, ticks)
 
     # ------------------------------------------------------------ frame
+    def geo_key(self):
+        """What the rectangles depend on besides the panel sizes: the window, the mode and the song's track count."""
+        return (self.screen.get_size(), self.mode, self.roll.lanes if self.roll else 0, self.roll.nd if self.roll else 0)
+
+    def ensure_layout(self):
+        """Lay out again if the mode, the song or the window changed since the last layout (a click during a frame
+        can change them after update() ran), so drawing never uses rectangles made for something else."""
+        if getattr(self, "_geo_key", None) != self.geo_key():
+            self.relayout()
+
     def relayout(self):
         """Panel and lane rectangles for the window, the mode and the song's track count."""
         size = self.screen.get_size()
+        self._geo_key = self.geo_key()
         self.layout = L.compute(*size, self.prefs.panels, self.scale, hide_left=self.mode == "stack")
         if self.mode == "stack":
             self.geo = L.stack_rects(self.layout.center, self.fonts.line)
@@ -881,6 +892,7 @@ class Composer:
         self.prefs.view = mode
         self.dirty = True
         self.drag = None
+        self.relayout()
         if mode == "tracker":
             self.tr.col = min(self.sel_voice, self.roll.lanes - 1)
             self.tr.row = int(self.cursor_tick // self.snap_ticks)

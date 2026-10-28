@@ -29,9 +29,13 @@ def draw(app):
         ui.click, ui.pos = None, (-1, -1)
     clip(surf, lay.top)
     topbar(app)
+    app.ensure_layout()                            # the top bar's buttons may have changed the mode
+    lay = app.layout
     if lay.left[2] > 0:
         clip(surf, lay.left)
         voices(app)
+        app.ensure_layout()
+        lay = app.layout
     clip(surf, lay.center)
     if app.mode == "tracker" and app.roll is not None:
         tracker(app)
