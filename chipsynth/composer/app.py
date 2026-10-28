@@ -74,6 +74,7 @@ class Composer:
         self.label = ""
         self.source = ""
         self.sel_voice = 0
+        self.voices_scroll = 0                      # pixels the Voices panel is scrolled (songs with many tracks)
         self.muted, self.solos = set(), set()
         self.loop_on, self.follow = True, True
         self.playing = False
@@ -150,6 +151,8 @@ class Composer:
         self.label = label or song.title or "Untitled"
         self.inst_names = self.build_names(tune)
         self.roll = M.Roll.from_tune(tune, self.inst_name)
+        self.stack.names = self.roll.names
+        self.stack.pinned = {k: v for k, v in self.stack.pinned.items() if k < self.roll.nv}
         self.muted, self.solos = set(), set()
         self.note_sel = self.note_hover = None
         self.hit_sel = None
@@ -222,7 +225,7 @@ class Composer:
         g = self.geo.get("grid") or L.roll_rects(self.layout.center, self.fonts.line)["grid"]
         low, high = self.roll.low, self.roll.high
         if (high - low + 1) * self.view.row > g[3]:             # everything does not fit: show the picked voice
-            own = [n.pitch for n in self.roll.notes[self.sel_voice]] if self.sel_voice < 4 else []
+            own = [n.pitch for n in self.roll.notes[self.sel_voice]] if self.sel_voice < self.roll.nv else []
             if own:
                 low, high = min(own), max(own)
         self.view.show(low, high, g[2], g[3])
@@ -235,7 +238,7 @@ class Composer:
 
     # ------------------------------------------------------------ playback
     def muted_now(self):
-        return M.solo_set(self.solos) | self.muted
+        return M.solo_set(self.solos, self.roll.lanes) | self.muted
 
     def play(self, from_tick=None):
         if self.tune is None:
@@ -317,7 +320,7 @@ class Composer:
             self.geo = L.stack_rects(self.layout.center, self.fonts.line)
             self.sync_stack()
         else:
-            self.geo = L.roll_rects(self.layout.center, self.fonts.line)
+            self.geo = L.roll_rects(self.layout.center, self.fonts.line, self.roll.nd if self.roll else 2)
         if self.roll:
             self.clamp_view()
             tick = self.playhead()
@@ -438,7 +441,7 @@ class Composer:
             self.drag = dict(kind="ruler")
         elif L.contains(g["grid"], x, y) or L.contains(g["vel"], x, y):
             self.grid_down(pos)
-        elif any(L.contains(g[k], x, y) for k in ("dac0", "dac1")):
+        elif L.dac_at(g, x, y) is not None:
             self.lane_down(pos)
         elif L.contains(panels.overview_rect(self), x, y):
             self.drag = dict(kind="overview")
@@ -468,7 +471,7 @@ class Composer:
         if hit:
             self.sel_voice = hit[0]
             self.begin_note_drag(hit, pos)
-        elif L.contains(g["grid"], x, y) and self.sel_voice < 4:
+        elif L.contains(g["grid"], x, y) and self.sel_voice < self.roll.nv:
             self.begin_new_note(pos)
 
     def stack_down(self, pos):
@@ -489,7 +492,7 @@ class Composer:
             if lane is None:
                 return True
             self.sel_voice = lane
-            if lane >= 4:
+            if lane >= self.roll.nv:
                 self.lane_down(pos, lane)
             else:
                 self.grid_down(pos)
@@ -547,6 +550,10 @@ class Composer:
             return
         if L.contains(self.layout.right, *pos):
             self.insp_scroll = max(0, self.insp_scroll - int(dy * 30))
+            return
+        if L.contains(self.layout.left, *pos):
+            self.voices_scroll = max(0, self.voices_scroll - int(dy * 40))
+            self.dirty = True
             return
         if self.roll is None or not (L.contains(self.layout.center, *pos)):
             return
@@ -695,7 +702,7 @@ class Composer:
             self.toggle_mute(self.sel_voice)
         elif k == pygame.K_s:
             self.toggle_solo(self.sel_voice)
-        elif pygame.K_1 <= k <= pygame.K_6:
+        elif pygame.K_1 <= k <= pygame.K_9 and k - pygame.K_1 < self.roll.lanes:
             self.sel_voice = k - pygame.K_1
         elif k in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS) and self.roll:
             self.zoom_h_center(1.25)
@@ -768,6 +775,7 @@ class Composer:
         """The Song changed: rebuild what is shown from the editor's tune; `select` is (voice, start, pitch)."""
         self.tune = self.ed.tune
         self.roll = M.Roll.from_tune(self.tune, self.inst_name)
+        self.stack.names = self.roll.names
         self.note_hover = None
         self.note_sel = None
         hs, self.hit_sel = self.hit_sel, None
@@ -868,7 +876,7 @@ class Composer:
         self.dirty = True
         self.drag = None
         if mode == "tracker":
-            self.tr.col = min(self.sel_voice, 5)
+            self.tr.col = min(self.sel_voice, self.roll.lanes - 1)
             self.tr.row = int(self.cursor_tick // self.snap_ticks)
             self.tracker_visible()
         elif before == "tracker":
@@ -885,6 +893,12 @@ class Composer:
         elif c.row >= c.top + g["visible"]:
             c.top = c.row - g["visible"] + 1
         c.top = max(0, c.top)
+        c.col = max(0, min(self.roll.lanes - 1, c.col)) if self.roll else 0
+        if c.col < c.left:
+            c.left = c.col
+        elif c.col >= c.left + g["cols"]:
+            c.left = c.col - g["cols"] + 1
+        c.left = max(0, min(c.left, max(0, (self.roll.lanes if self.roll else 1) - g["cols"])))
 
     def tracker_down(self, pos):
         g = panels.tracker_geo(self)
@@ -892,9 +906,9 @@ class Composer:
         if not L.contains((g["x"], g["rows_y"], g["w"] - g["sb"], g["h"] - g["head"]), x, y):
             return
         row = self.tr.top + (y - g["rows_y"]) // g["row_h"]
-        col = (x - g["x"] - g["rn"]) // g["cw"]
+        col = self.tr.left + (x - g["x"] - g["rn"]) // g["cw"]
         self.tr.row = max(0, row)
-        if 0 <= col < 6:
+        if 0 <= col < self.roll.lanes:
             self.tr.col = col
             self.sel_voice = col
         self.note_sel = self.hit_sel = None
@@ -902,7 +916,7 @@ class Composer:
 
     def audition(self, voice, pitch):
         """Play one short note on the voice's instrument (what you hear when you type it in the tracker)."""
-        if voice > 3 or self.ed is None:
+        if voice >= self.roll.nv or self.ed is None:
             return
         from chipsynth.song import Octave
         from chipsynth.songedit import spell
@@ -952,9 +966,9 @@ class Composer:
         elif k == pygame.K_END:
             c.row = n - 1
         elif k == pygame.K_LEFT:
-            c.col = (c.col - 1) % 6
+            c.col = (c.col - 1) % self.roll.lanes
         elif k == pygame.K_RIGHT:
-            c.col = (c.col + 1) % 6
+            c.col = (c.col + 1) % self.roll.lanes
         elif k in (pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
             c.octave = max(0, min(8, c.octave + (-1 if k in (pygame.K_MINUS, pygame.K_KP_MINUS) else 1)))
             self.say("Octave %d" % c.octave, 1.5)
@@ -962,7 +976,7 @@ class Composer:
         elif k in (pygame.K_DELETE, pygame.K_BACKSPACE):
             self.tracker_erase()
             c.row += 1 if k == pygame.K_BACKSPACE else 0
-        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and c.col >= 4:
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and c.col >= self.roll.nv:
             self.tracker_hit()
             c.row += 1
         elif k in (pygame.K_COMMA, pygame.K_PERIOD) and not mods & pygame.KMOD_CTRL:
@@ -975,7 +989,7 @@ class Composer:
             if not self.playing:
                 self.cursor_tick = c.row * rt
             return False                                    # the normal play / stop
-        elif c.col < 4 and not mods & (pygame.KMOD_ALT | pygame.KMOD_META):
+        elif c.col < self.roll.nv and not mods & (pygame.KMOD_ALT | pygame.KMOD_META):
             ch = TR.key_char(k, getattr(e, "unicode", ""))
             pitch = TR.piano_pitch(ch, c.octave)
             if pitch is None:
@@ -996,7 +1010,7 @@ class Composer:
     def tracker_note(self):
         """(voice, index) of the note at the tracker cursor, or None (and says so)."""
         c = self.tr
-        i = TR.note_at(self.roll, c.col, c.row * self.snap_ticks) if c.col < 4 else None
+        i = TR.note_at(self.roll, c.col, c.row * self.snap_ticks) if c.col < self.roll.nv else None
         if i is None:
             self.say("No note here.", 1.5)
             return None
@@ -1028,7 +1042,7 @@ class Composer:
     def tracker_erase(self):
         c, rt = self.tr, self.snap_ticks
         tick = c.row * rt
-        if c.col < 4:
+        if c.col < self.roll.nv:
             i = TR.note_at(self.roll, c.col, tick)
             if i is not None:
                 self.edit(lambda: self.ed.erase(c.col, i), None)
@@ -1068,7 +1082,8 @@ class Composer:
             self.note_sel = (v, i) if i is not None else None
 
     def select_all(self, all_voices=False):
-        voices = range(4) if all_voices else [min(self.sel_voice, 3)]
+        nv = self.roll.nv
+        voices = range(nv) if all_voices else [min(self.sel_voice, nv - 1)]
         self.set_selection({(v, n.start) for v in voices for n in self.roll.notes[v]})
         self.say("%d notes selected" % len(self.selection()), 2.0)
 
@@ -1076,7 +1091,7 @@ class Composer:
         g = self.geo["grid"]
         (x0, y0), (x1, y1) = d["at"], d["to"]
         t0, t1 = sorted((self.view.tick_at(x0, g[0]), self.view.tick_at(x1, g[0])))
-        v = min(self.sel_voice, 3)
+        v = min(self.sel_voice, self.roll.nv - 1)
         if self.mode == "stack":                              # pitches as the picked lane shows them
             p0, p1 = sorted((self.stack.pitch_at(v, y0 - g[1], self.roll), self.stack.pitch_at(v, y1 - g[1], self.roll)))
         else:
@@ -1376,8 +1391,8 @@ class Composer:
         g = self.geo["grid"]
         if self.mode == "stack":                         # the pitch comes from the lane being worked in
             lane = self.drag["voice"] if self.drag and "voice" in self.drag else self.stack_lane(pos)
-            if lane is None or lane > 3:
-                lane = min(self.sel_voice, 3)
+            if lane is None or lane >= self.roll.nv:
+                lane = min(self.sel_voice, self.roll.nv - 1)
             return self.view.tick_at(pos[0], g[0]), self.stack.pitch_at(lane, pos[1] - g[1], self.roll)
         return self.view.tick_at(pos[0], g[0]), self.view.pitch_at(pos[1], g[1])
 
@@ -1456,10 +1471,10 @@ class Composer:
     def lane_down(self, pos, lane=None):
         g = self.geo
         if lane is None:
-            lane = 4 if L.contains(g["dac0"], *pos) else 5
+            lane = self.roll.nv + (L.dac_at(g, *pos) or 0)
         self.sel_voice, self.note_sel = lane, None
         tick = self.view.tick_at(pos[0], g["grid"][0])
-        for b in self.roll.dac[lane - 4]:
+        for b in self.roll.dac_of(lane):
             if b.start <= tick < b.start + b.dur:
                 self.hit_sel = (lane, b.start)
                 self.drag = dict(kind="hit_move", lane=lane, start=b.start, tick0=tick, moved=False, new=b.start)
@@ -1518,7 +1533,7 @@ class Composer:
             return False
         self.imported[name] = smp
         self.sample_name = name
-        self.sel_voice = 4 if self.sel_voice < 4 else self.sel_voice
+        self.sel_voice = self.roll.nv if self.sel_voice < self.roll.nv and self.roll.nd else self.sel_voice
         self.say("Imported %s: %.2f s, %d bytes. Click a drum lane to place it." % (name, smp.seconds, smp.size), 6.0)
         return True
 
@@ -1677,15 +1692,15 @@ class Composer:
         g = self.geo["grid"]
         tick = self.view.tick_at(pos[0], g[0])
         pitch = self.view.pitch_at(pos[1], g[1])
-        order = [self.sel_voice] + [v for v in range(4) if v != self.sel_voice]
+        order = [self.sel_voice] + [v for v in range(self.roll.nv) if v != self.sel_voice]
         if self.mode == "stack":                         # only the lane under the pointer, at that lane's pitches
             lane = self.stack_lane(pos)
-            if lane is None or lane > 3:
+            if lane is None or lane >= self.roll.nv:
                 return None
             pitch = self.stack.pitch_at(lane, pos[1] - g[1], self.roll)
             order = [lane]
         for v in order:
-            if v > 3:
+            if v >= self.roll.nv:
                 continue
             for i in range(len(self.roll.notes[v]) - 1, -1, -1):
                 n = self.roll.notes[v][i]

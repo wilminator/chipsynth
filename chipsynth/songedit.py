@@ -841,7 +841,7 @@ class Editor:
             if len({n[0] for n in notes}) > 1:
                 raise EditError("select notes of one voice to make a pattern")
             voice = notes[0][0]
-            if voice > 3:
+            if voice >= self.song.voices:
                 raise EditError("patterns are made from the melodic voices")
             t0, t1 = min(n[1] for n in notes), max(n[1] + n[2] for n in notes)
             pieces = [p for p in self.trace.pieces[voice] if t0 <= p.start < t1]
