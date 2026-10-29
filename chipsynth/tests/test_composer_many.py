@@ -420,3 +420,38 @@ class CollapseVoicesTests(unittest.TestCase):
         self.assertIsNone(a.overlay)
         self.assertLessEqual(sum(1 for v in range(6) if a.tune.voices[v]), 3)
         self.assertTrue(a.song_dirty)
+
+
+class MarqueeAcrossVoicesTests(unittest.TestCase):
+    def make(self):
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        a = Composer(screen, Prefs(view="stack"), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        text = "voices 6\n" + "\n".join("V%d: l4 c d e f c d e f" % i for i in range(1, 7)) + "\n"
+        a.load_song(Song.from_mml(text), "t", "", "t")
+        a.frame()
+        a.set_mode("stack")
+        a.frame()
+        return a
+
+    def box(self, a, lanes, bars):
+        g = a.geo["grid"]
+        bt = a.tune.bar_ticks
+        x = lambda tick: int(g[0] + (tick - a.view.scroll_tick) * a.view.ppt)
+        h = a.stack.height
+        a.drag = dict(kind="marquee", at=(x(0) + 1, g[1] + lanes[0] * h + 1), to=(x(bars * bt) - 1, g[1] + (lanes[1] + 1) * h - 2), add=False)
+        a.finish_marquee(a.drag)
+        return {v for v, _ in a.selection()}
+
+    def test_one_bar_over_many_voices(self):
+        a = self.make()
+        got = self.box(a, (0, 3), 1)
+        self.assertEqual(got, {0, 1, 2, 3})
+
+    def test_one_voice_over_many_bars(self):
+        a = self.make()
+        got = self.box(a, (1, 1), 2)
+        self.assertEqual(got, {1})
+        self.assertGreater(len(a.selection()), 4)

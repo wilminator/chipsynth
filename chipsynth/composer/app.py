@@ -1205,12 +1205,21 @@ class Composer:
         g = self.geo["grid"]
         (x0, y0), (x1, y1) = d["at"], d["to"]
         t0, t1 = sorted((self.view.tick_at(x0, g[0]), self.view.tick_at(x1, g[0])))
-        v = min(self.sel_voice, self.roll.nv - 1)
-        if self.mode == "stack":                              # pitches as the picked lane shows them
-            p0, p1 = sorted((self.stack.pitch_at(v, y0 - g[1], self.roll), self.stack.pitch_at(v, y1 - g[1], self.roll)))
+        if self.mode == "stack":                              # every lane the box touches, pitches as each lane shows them
+            area_h = g[3]
+            ya, yb = sorted((max(0, min(area_h - 1, y0 - g[1])), max(0, min(area_h - 1, y1 - g[1]))))
+            la, lb = self.stack.track_at(ya, area_h), self.stack.track_at(yb, area_h)
+            got = set()
+            if la is not None and lb is not None:
+                for v in range(la, min(lb, self.roll.nv - 1) + 1):
+                    top = self.stack.top_of(v)
+                    lo_y, hi_y = max(ya, top), min(yb, top + self.stack.height - 1)
+                    p0, p1 = sorted((self.stack.pitch_at(v, lo_y, self.roll), self.stack.pitch_at(v, hi_y, self.roll)))
+                    got |= {(v, n.start) for n in self.roll.notes[v] if n.start < t1 and n.start + n.dur > t0 and p0 <= n.pitch <= p1}
         else:
+            v = min(self.sel_voice, self.roll.nv - 1)
             p0, p1 = sorted((self.view.pitch_at(y0, g[1]), self.view.pitch_at(y1, g[1])))
-        got = {(v, n.start) for n in self.roll.notes[v] if n.start < t1 and n.start + n.dur > t0 and p0 <= n.pitch <= p1}
+            got = {(v, n.start) for n in self.roll.notes[v] if n.start < t1 and n.start + n.dur > t0 and p0 <= n.pitch <= p1}
         self.set_selection((self.selection() | got) if d["add"] else got)
         if got:
             self.say("%d note%s selected" % (len(got), "" if len(got) == 1 else "s"), 2.0)
