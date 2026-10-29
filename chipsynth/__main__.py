@@ -7,7 +7,7 @@
                                   sets), scales and samples.  --type song,sample,...  --name 'd*' (TYPE:NAME too)
   dump PKG.csp [-o FILE]          the package as text (stdout by default)
   build TEXT [-o PKG.csp]         assemble a package from a dump
-  import PKG.csp FILE.mml ...     add songs (song id = file name) to a package, creating it if needed
+  import PKG.csp FILE.mml ...     add songs (song id = file name, with `_` for anything an id may not hold) to a package, creating it if needed
                                   (FILE.mid works too: the first four parts with notes)
                                     --id NAME     the song id, when there is one file
                                     --shared      the files are libraries ([instr] [fx] [key] [sample]): their
@@ -153,7 +153,7 @@ def import_cmd(args):
     p = parser("import", "Add songs from MML (or MIDI) files to a package, creating the package if it is not there.")
     p.add_argument("package", metavar="PKG.csp")
     p.add_argument("files", nargs="+", metavar="FILE")
-    p.add_argument("--id", metavar="NAME", help="the song id (default: the file name); needs exactly one file")
+    p.add_argument("--id", metavar="NAME", help="the song id (default: the file name, bad characters become _); needs exactly one file")
     p.add_argument("--shared", action="store_true",
                    help="the files are libraries: add their instruments, fx, scales and samples to the package")
     p.add_argument("--no-replace", action="store_true", help="refuse a song id that the package already has")
@@ -175,7 +175,7 @@ def import_cmd(args):
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, shared=True)
             print("added the shared parts of", f)
             continue
-        sid = a.id or Path(f).stem
+        sid = a.id or pk.Package.safe_id(Path(f).stem)
         if sid in pkg.songs and a.no_replace:
             raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
         verb = "replaced" if sid in pkg.songs else "added"

@@ -397,3 +397,20 @@ class ExportSongTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImportFileNameIdTests(Base):
+    def test_a_file_name_with_spaces_and_odd_characters_becomes_an_id_with_underscores(self):
+        from chipsynth import package as pk
+        src = self.tmp / "Bloody Tears (v2)!.mml"
+        src.write_text("V1: c d e f\n")
+        path = self.tmp / "m.csp"
+        rc, out, err = run("import", path, src)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Bloody_Tears__v2__", pk.load(path).songs)
+
+    def test_an_explicit_id_is_still_checked(self):
+        src = self.tmp / "a.mml"
+        src.write_text("V1: c\n")
+        rc, out, err = run("import", self.tmp / "m.csp", src, "--id", "bad id")
+        self.assertNotEqual(rc, 0)
