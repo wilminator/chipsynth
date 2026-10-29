@@ -716,6 +716,52 @@ class Editor:
                 self._insert_at(0, tick, Loop())
         return self.change("loop point", run)
 
+    def cut_at(self, tick):
+        """End the song at `tick`: everything from there on goes, in every track, and a note or rest that crosses it is
+        shortened.  Refuses when the cut falls inside a repeat or a pattern call (move it to the end of one)."""
+        tick = int(tick)
+        if tick <= 0:
+            raise EditError("put the cursor where the song should end")
+
+        def top_event(p):
+            return p.stack[0][1] if p.stack else p.event
+
+        def run():
+            if tick >= self.tune.length:
+                raise EditError("the song already ends there or earlier")
+            for lane, pieces in enumerate(self.trace.pieces):
+                spans = {}
+                for p in pieces:
+                    ev = top_event(p)
+                    lo, hi = spans.get(id(ev), (p.start, p.start + p.dur))
+                    spans[id(ev)] = (min(lo, p.start), max(hi, p.start + p.dur))
+                for p in pieces:
+                    ev = top_event(p)
+                    lo, hi = spans[id(ev)]
+                    if (p.stack or isinstance(ev, (Repeat, Call))) and lo < tick < hi:
+                        raise EditError("the cut is inside a repeat or a pattern: pick the end of one")
+            for lane, pieces in enumerate(self.trace.pieces):          # shorten what crosses the cut
+                for p in list(pieces):
+                    if not p.start < tick < p.start + p.dur:
+                        continue
+                    if p.kind == "rest":
+                        p.event.dur = tick - p.start
+                    elif p.kind in ("note", "extend") and p.note is not None and lane < self.song.voices:
+                        i = self.find(lane, p.note.start)
+                        if i is not None:
+                            self._resize(lane, i, tick - p.note.start)
+            self.refresh()
+            for lane, name in enumerate(self.song.names):               # drop what starts at or after the cut
+                items = self.song.tracks.get(name)
+                if not items:
+                    continue
+                gone = {id(top_event(p)) for p in self.trace.pieces[lane] if p.start >= tick}
+                keep = {id(top_event(p)) for p in self.trace.pieces[lane] if p.start < tick}
+                items[:] = [e for e in items if id(e) not in gone or id(e) in keep]
+                while items and isinstance(items[-1], Bar):
+                    items.pop()
+        return self.change("cut song", run)
+
     _STATE = (Octave, Volume, Select, Fx, Tweak, Key, Comment, Length)         # events with no length: they may sit among the end rests
 
     def _trailing(self, items):

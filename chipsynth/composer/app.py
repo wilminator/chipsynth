@@ -547,6 +547,8 @@ class Composer:
         elif k == "ruler":
             g = self.geo["ruler"]
             self.cursor_tick = self.snap_bar(self.view.tick_at(x, g[0]))
+        elif k == "trh":
+            self.tracker_left_to(x)
         elif k == "overview":
             self.overview_to(x)
         elif k == "marquee":
@@ -574,7 +576,12 @@ class Composer:
         if self.roll is None or not (L.contains(self.layout.center, *pos)):
             return
         if self.mode == "tracker":
-            self.tr.top = max(0, self.tr.top - int(dy * 3))
+            if shift or dx:
+                g = panels.tracker_geo(self)
+                d = dx or dy
+                self.tr.left = max(0, min(max(0, g["lanes"] - g["cols"]), self.tr.left - ((d > 0) - (d < 0))))
+            else:
+                self.tr.top = max(0, self.tr.top - int(dy * 3))
             return
         g = self.geo["grid"]
         if self.mode == "stack":
@@ -921,7 +928,11 @@ class Composer:
     def tracker_down(self, pos):
         g = panels.tracker_geo(self)
         x, y = pos
-        if not L.contains((g["x"], g["rows_y"], g["w"] - g["sb"], g["h"] - g["head"]), x, y):
+        if g["hbar"] and L.contains(g["hbar"], x, y):
+            self.drag = dict(kind="trh")
+            self.tracker_left_to(x)
+            return
+        if not L.contains((g["x"], g["rows_y"], g["w"] - g["sb"], g["h"] - g["head"] - (g["hbar"][3] if g["hbar"] else 0)), x, y):
             return
         row = self.tr.top + (y - g["rows_y"]) // g["row_h"]
         col = self.tr.left + (x - g["x"] - g["rn"]) // g["cw"]
@@ -1212,6 +1223,23 @@ class Composer:
         if self.edit(lambda: self.ed.trim_end()):
             self.say("Trimmed the song from %d to %d bars." % (-(-before // self.tune.bar_ticks),
                                                                 -(-self.ed.tune.length // self.tune.bar_ticks)), 4.0)
+
+    def cut_here(self):
+        before = self.tune.length
+        if self.edit(lambda: self.ed.cut_at(self.cursor_tick)):
+            bt = self.tune.bar_ticks
+            self.say("The song now ends at bar %d (it was %d bars)." % (-(-self.ed.tune.length // bt), -(-before // bt)), 4.0)
+
+    def tracker_left_to(self, x):
+        """Scroll the tracker's columns so the bar's thumb is centred on x."""
+        g = panels.tracker_geo(self)
+        hb = g["hbar"]
+        if not hb:
+            return
+        span = max(1, g["lanes"] - g["cols"])
+        frac = (x - hb[0]) / max(1, hb[2])
+        self.tr.left = max(0, min(span, int(round(frac * g["lanes"] - g["cols"] / 2))))
+        self.dirty = True
 
     def add_tempo_here(self):
         tick = self.cursor_tick

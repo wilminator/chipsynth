@@ -200,3 +200,54 @@ class TrimEndTests(unittest.TestCase):
         self.assertEqual(ed.trailing_rest_ticks(), 96)
         ed.trim_end()
         self.assertEqual(ed.tune.length, 384)
+
+
+class CutAtTests(unittest.TestCase):
+    TEXT = "V1: l4 c d e f | g a b >c |\nV2: l1 c | e |\n"
+
+    def test_cut_on_a_beat_removes_everything_after_it(self):
+        ed = Editor(Song.from_mml(self.TEXT), None)
+        ed.cut_at(480)
+        self.assertEqual(ed.tune.length, 480)
+        self.assertEqual([n.start for n in ed.tune.voices[0]], [0, 96, 192, 288, 384])
+        self.assertEqual([(n.start, n.dur) for n in ed.tune.voices[1]], [(0, 384), (384, 96)])
+
+    def test_a_note_crossing_the_cut_is_shortened(self):
+        ed = Editor(Song.from_mml(self.TEXT), None)
+        ed.cut_at(430)
+        self.assertEqual(ed.tune.length, 430)
+        n = ed.tune.voices[0][-1]
+        self.assertEqual((n.start, n.dur), (384, 46))
+
+    def test_it_can_be_undone(self):
+        ed = Editor(Song.from_mml(self.TEXT), None)
+        ed.cut_at(480)
+        ed.undo()
+        self.assertEqual(ed.tune.length, 768)
+
+    def test_cutting_at_or_after_the_end_or_at_zero_is_refused(self):
+        ed = Editor(Song.from_mml(self.TEXT), None)
+        for t in (0, 768, 900):
+            with self.assertRaises(EditError):
+                ed.cut_at(t)
+        self.assertEqual(ed.tune.length, 768)
+
+    def test_a_cut_inside_a_repeat_is_refused_and_changes_nothing(self):
+        ed = Editor(Song.from_mml("V1: [ c4 d4 ]3\n"), None)
+        before = ed.song.to_mml()
+        length = ed.tune.length
+        with self.assertRaises(EditError):
+            ed.cut_at(100)
+        self.assertEqual(ed.song.to_mml(), before)
+        self.assertEqual(ed.tune.length, length)
+
+    def test_a_cut_at_the_end_of_a_repeat_is_allowed(self):
+        ed = Editor(Song.from_mml("V1: [ c4 d4 ]3 e4\n"), None)
+        ed.cut_at(576)                                           # 3 x 192
+        self.assertEqual(ed.tune.length, 576)
+
+    def test_the_result_still_round_trips_through_mml(self):
+        ed = Editor(Song.from_mml(self.TEXT), None)
+        ed.cut_at(430)
+        again = Song.from_mml(ed.song.to_mml())
+        self.assertEqual(again.compile().length, 430)

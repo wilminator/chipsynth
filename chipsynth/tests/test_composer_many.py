@@ -198,3 +198,62 @@ class TrimEndWindowTests(unittest.TestCase):
         self.assertEqual(a.tune.length, 384)
         a.trim_end()                                     # nothing left to trim: says so, changes nothing
         self.assertEqual(a.tune.length, 384)
+
+
+class ExtrasTests(unittest.TestCase):
+    def open(self, text, view="tracker", size=(960, 600), lb=None):
+        pygame.init()
+        screen = pygame.display.set_mode(size, pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        a = Composer(screen, Prefs(view=view), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        a.load_song(Song.from_mml(text, lb), "Song", source=str(d / "t.mml"))
+        a.frame()
+        return a
+
+    def wide(self):
+        return "voices 12\ndacs 4\n" + "\n".join("V%d: c d e f" % i for i in range(1, 13)) + "\n"
+
+    def test_the_tracker_shows_a_bar_when_columns_do_not_fit_and_it_scrolls(self):
+        a = self.open(self.wide())
+        g = panels.tracker_geo(a)
+        self.assertLess(g["cols"], 16)
+        self.assertIsNotNone(g["hbar"])
+        hb = g["hbar"]
+        a.frame([pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(hb[0] + hb[2] - 3, hb[1] + 3), button=1)])
+        self.assertEqual(a.tr.left, 16 - g["cols"])
+        a.frame([pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(hb[0] + hb[2] - 3, hb[1] + 3), button=1)])
+        a.frame([pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(hb[0] + 2, hb[1] + 3), button=1)])
+        self.assertEqual(a.tr.left, 0)
+        self.assertEqual(a.tr.col, 0)
+
+    def test_no_bar_when_everything_fits(self):
+        a = self.open("V1: c d e f\n", size=(1280, 760))
+        self.assertIsNone(panels.tracker_geo(a)["hbar"])
+
+    def test_shift_wheel_scrolls_the_columns(self):
+        a = self.open(self.wide())
+        a.ui.pos = (a.layout.center[0] + 100, a.layout.center[1] + 100)
+        pygame.key.set_mods(pygame.KMOD_SHIFT)
+        try:
+            a.frame([pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1, precise_x=0.0, precise_y=-1.0)])
+        finally:
+            pygame.key.set_mods(0)
+        self.assertEqual(a.tr.left, 1)
+
+    def test_the_octave_follows_the_keys(self):
+        a = self.open("V1: c d e f\n", size=(1280, 760))
+        self.assertEqual(a.tr.octave, 4)
+        a.frame([pygame.event.Event(pygame.KEYDOWN, key=pygame.K_UP, mod=pygame.KMOD_SHIFT, unicode="")])
+        self.assertEqual(a.tr.octave, 5)
+        a.frame([pygame.event.Event(pygame.KEYDOWN, key=pygame.K_MINUS, mod=0, unicode="-")])
+        self.assertEqual(a.tr.octave, 4)
+
+    def test_end_the_song_at_the_cursor(self):
+        a = self.open("V1: l4 c d e f | g a b >c |\n", view="roll", size=(1280, 760))
+        a.cursor_tick = 480
+        a.cut_here()
+        self.assertEqual(a.tune.length, 480)
+        a.cursor_tick = 9999
+        a.cut_here()                                    # past the end: says so and changes nothing
+        self.assertEqual(a.tune.length, 480)
