@@ -8,13 +8,15 @@
   dump PKG.csp [-o FILE]          the package as text (stdout by default)
   build TEXT [-o PKG.csp]         assemble a package from a dump
   import PKG.csp FILE.mml ...     add songs (song id = file name, with `_` for anything an id may not hold) to a package, creating it if needed
-                                  (FILE.mid works too: the first four parts with notes)
+                                  (FILE.mid works too; FILE.txt from FamiStudio's File > Export > FamiStudio Text works too)
                                     --id NAME     the song id, when there is one file
                                     --shared      the files are libraries ([instr] [fx] [key] [sample]): their
                                                   parts are added to the package for all its songs
                                     --lib DIR     a game's music/lib (instruments and the like the MML uses)
                                     --samples DIR where NAME.dpcm files for [sample] are
                                     --no-replace  refuse a song id that is already in the package
+                                    --voices N    (MIDI) make songs of N voices; the others' notes fill the gaps
+                                    --song NAME   (FamiStudio) only this song (a name or a number); --region ntsc|pal
   export PKG.csp [options]        components as MML: each song as ID.mml, the rest in lib/PACKAGE.mml, DPCM samples
                                   in samples/NAME.dpcm (a game's music folder).  Without --type: songs and the
                                   package's shared parts.
@@ -160,6 +162,9 @@ def import_cmd(args):
     p.add_argument("--voices", type=int, metavar="N",
                    help="(MIDI) make songs of N voices: the most important parts stay and the others' notes fill their gaps "
                         "(default: a voice for every part, up to 16)")
+    p.add_argument("--song", metavar="NAME", help="(FamiStudio) import only this song, by name or number (default: every song)")
+    p.add_argument("--region", choices=("ntsc", "pal"), help="(FamiStudio) the timing to use (default: what the file says)")
+    p.add_argument("--report", metavar="FILE", help="(FamiStudio) also write what was changed or left out, as JSON")
     add_library_options(p)
     a = p.parse_args(args)
     if a.id and len(a.files) != 1:
@@ -175,6 +180,9 @@ def import_cmd(args):
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, shared=True)
             print("added the shared parts of", f)
             continue
+        if Path(f).suffix.lower() == ".txt":
+            import_famistudio(a, pkg, f, lib)
+            continue
         sid = a.id or pk.Package.safe_id(Path(f).stem)
         if sid in pkg.songs and a.no_replace:
             raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
@@ -187,6 +195,31 @@ def import_cmd(args):
     pk.save(pkg, path)
     print("%s: %d song(s)" % (path, len(pkg.songs)))
     return 0
+
+
+def import_famistudio(a, pkg, f, lib):
+    from .formats import famistudio_text as fam
+    text = Path(f).read_text(encoding="utf-8-sig")
+    if not fam.looks_like(text):
+        raise pk.PackageError("%s is not a FamiStudio text file (it should start with a Project line)" % f)
+    res = fam.load(text, song=a.song, region=a.region)
+    if a.id and len(res.songs) != 1:
+        raise pk.PackageError("--id needs one song: the file has %d (pick one with --song)" % len(res.songs))
+    stem = pk.Package.safe_id(Path(f).stem)
+    for imp in res.songs:
+        sid = a.id or (stem if len(res.songs) == 1 else "%s_%s" % (stem, pk.Package.safe_id(imp.name, "song")))
+        if sid in pkg.songs and a.no_replace:
+            raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
+        verb = "replaced" if sid in pkg.songs else "added"
+        mem = dict(lib)
+        mem["_mem"] = {**lib.get("_mem", {}), **imp.samples}
+        pkg.add_song(sid, imp.song, mem)
+        print("%s song '%s' from %s (%s)" % (verb, sid, f, imp.name))
+    for line in res.report.lines():
+        print("  " + line)
+    if a.report:
+        import json
+        Path(a.report).write_text(json.dumps(res.report.as_dict(), indent=2), encoding="utf-8")
 
 
 def export_cmd(args):
