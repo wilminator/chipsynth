@@ -15,8 +15,13 @@ from chipsynth.synth import RATE
 
 BEAT = TICKS_WHOLE // 4
 SNAPS = (("1/4", 96), ("1/8", 48), ("1/16", 24), ("1/32", 12), ("1/8T", 32), ("1/16T", 16))   # note-grid choices
-VOICES = 6                                   # V1-V4, D1, D2
+VOICES = 6                                   # the default: V1-V4, D1, D2
 NAMES = ("V1", "V2", "V3", "V4", "D1", "D2")
+
+
+def lane_names(nv=4, nd=2):
+    """("V1".."Vn", "D1".."Dm"): the lanes of a song with nv voices and nd DACs (lane i < nv is a voice)."""
+    return tuple("V%d" % i for i in range(1, nv + 1)) + tuple("D%d" % i for i in range(1, nd + 1))
 LOW, HIGH = 0, 8 * 12 + 11                   # C0 .. B8
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
@@ -43,7 +48,7 @@ class RollNote:
 
 @dataclass
 class DacBlock:
-    voice: int                 # 4 or 5
+    voice: int                 # the lane: nv + the DAC's index
     start: int
     dur: int
     name: str
@@ -52,18 +57,39 @@ class DacBlock:
 
 @dataclass
 class Roll:
-    notes: list = field(default_factory=lambda: [[] for _ in range(4)])
-    dac: list = field(default_factory=lambda: [[], []])
+    notes: list = field(default_factory=lambda: [[] for _ in range(4)])     # per voice
+    dac: list = field(default_factory=lambda: [[], []])                     # per DAC (lane nv + i)
     low: int = 48
     high: int = 72
     length: int = 0
     loop_tick: int = 0
     bar_ticks: int = TICKS_WHOLE
 
+    @property
+    def nv(self):
+        return len(self.notes)
+
+    @property
+    def nd(self):
+        return len(self.dac)
+
+    @property
+    def lanes(self):
+        return len(self.notes) + len(self.dac)
+
+    @property
+    def names(self):
+        return lane_names(self.nv, self.nd)
+
+    def dac_of(self, lane):
+        """The DacBlocks of lane `lane` (a DAC lane)."""
+        return self.dac[lane - self.nv]
+
     @classmethod
     def from_tune(cls, tune, names=None):
         """`names(inst)` -> a display name for an Instrument (or None)."""
-        r = cls(length=tune.length, loop_tick=tune.loop_tick, bar_ticks=tune.bar_ticks)
+        r = cls(notes=[[] for _ in tune.voices], dac=[[] for _ in tune.dac],
+                length=tune.length, loop_tick=tune.loop_tick, bar_ticks=tune.bar_ticks)
         for vi, voice in enumerate(tune.voices):
             for n in voice:
                 r.notes[vi].append(RollNote(vi, n.start, n.dur, n.pitch, n.vol, names(n.inst) if names else "", effect_of(n)))
@@ -77,7 +103,7 @@ class Roll:
                     if nxt[0] > tick and nxt[1] in ("play", "stop"):
                         end = min(end, nxt[0])
                         break
-                r.dac[di].append(DacBlock(4 + di, tick, max(1, int(round(end - tick))), smp.name or "sample",
+                r.dac[di].append(DacBlock(len(tune.voices) + di, tick, max(1, int(round(end - tick))), smp.name or "sample",
                                           extra[0] if extra else 15))
         pitches = [n.pitch for v in r.notes for n in v]
         if pitches:
@@ -118,7 +144,7 @@ def tune_from(tune, tick):
             for n in voice:
                 if n.start >= loop:
                     voices[vi].append(replace(n, start=n.start + gap))
-    dac = [[], []]
+    dac = [[] for _ in tune.dac]
     for di, events in enumerate(tune.dac):
         for e in events:
             if e[0] >= tick:
@@ -167,16 +193,17 @@ def source_tick(tune, seek_tick, ticks):
 
 
 def mixdown(tune, muted):
-    """The tune with the voices in `muted` (0-3 melodic, 4-5 DAC) silenced."""
+    """The tune with the lanes in `muted` (voices first, then DACs) silenced."""
     if not muted:
         return tune
+    nv = len(tune.voices)
     return replace(tune, voices=[[] if i in muted else v for i, v in enumerate(tune.voices)],
-                   dac=[[] if 4 + i in muted else d for i, d in enumerate(tune.dac)])
+                   dac=[[] if nv + i in muted else d for i, d in enumerate(tune.dac)])
 
 
-def solo_set(solos):
-    """The muted set that leaves only `solos` sounding."""
-    return set(range(VOICES)) - set(solos) if solos else set()
+def solo_set(solos, lanes=VOICES):
+    """The muted set that leaves only `solos` sounding (of `lanes` lanes)."""
+    return set(range(lanes)) - set(solos) if solos else set()
 
 
 # ------------------------------------------------------------------ the view

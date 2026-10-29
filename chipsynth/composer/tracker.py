@@ -19,6 +19,7 @@ EXTRA = 5                                      # empty bars after the end, so a 
 class Cursor:
     def __init__(self):
         self.row, self.col, self.top, self.octave = 0, 0, 0, 4
+        self.left = 0                       # first column on screen (songs with more tracks than fit)
 
     def tick(self, rt):
         return self.row * rt
@@ -49,7 +50,7 @@ def column_cells(roll, col, rt, first, count):
     """[(text, kind)] for rows first .. first+count-1 of one column.  kind: "start", "late" (starts off the row grid),
     "hold" or "empty"."""
     out = []
-    if col < 4:
+    if col < roll.nv:
         notes = sorted(roll.notes[col], key=lambda n: n.start)
         starts = [n.start for n in notes]
         for r in range(first, first + count):
@@ -63,7 +64,7 @@ def column_cells(roll, col, rt, first, count):
             else:
                 out.append(("", "empty"))
     else:
-        blocks = sorted(roll.dac[col - 4], key=lambda b: b.start)
+        blocks = sorted(roll.dac_of(col), key=lambda b: b.start)
         starts = [b.start for b in blocks]
         for r in range(first, first + count):
             t0, t1 = r * rt, (r + 1) * rt
@@ -79,7 +80,7 @@ def row_notes(roll, col, rt, first, count):
     """[RollNote or None] for rows first .. first+count-1 of a voice column: the note that starts within the row
     (what the volume and effect of the row belong to).  Drum columns give None."""
     out = []
-    if col >= 4:
+    if col >= roll.nv:
         return [None] * count
     notes = sorted(roll.notes[col], key=lambda n: n.start)
     starts = [n.start for n in notes]
@@ -102,7 +103,7 @@ def row_label(roll, row, rt):
 
 def note_at(roll, col, tick):
     """Index of the note of voice `col` that is sounding at `tick` (or starts there), else None."""
-    if col >= 4:
+    if col >= roll.nv:
         return None
     for i, n in enumerate(roll.notes[col]):
         if n.start <= tick < n.start + n.dur:
@@ -112,9 +113,9 @@ def note_at(roll, col, tick):
 
 def hit_at(roll, col, tick, rt):
     """The DacBlock of lane `col` that starts within the row at `tick`, else None."""
-    if col < 4:
+    if col < roll.nv:
         return None
-    for b in roll.dac[col - 4]:
+    for b in roll.dac_of(col):
         if tick <= b.start < tick + rt:
             return b
     return None

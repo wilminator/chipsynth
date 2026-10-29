@@ -84,26 +84,39 @@ def drag_bottom(panels, y, height, scale):
     panels.bottom = int(round(max(panels.BOTTOM[0], min((height - y) / scale, panels.BOTTOM[1]))))
 
 
-def roll_rects(center, line):
-    """The pieces of the piano-roll area: ruler, keys, grid, scroll bars and the lanes under the grid."""
+def roll_rects(center, line, nd=2):
+    """The pieces of the piano-roll area: ruler, keys, grid, scroll bars and the lanes under the grid (one strip per
+    DAC: dac0, dac1, ..)."""
     x, y, w, h = center
     ruler_h = int(line * 1.7)
     keys_w = int(line * 3.8)
     sb = max(11, int(line * 0.8))
     dac = int(line * 1.4)
     vel = int(line * 2.9)
-    lanes_h = 2 * dac + vel
+    lanes_h = nd * dac + vel
     grid_x, grid_w = x + keys_w, max(0, w - keys_w - sb)
     grid_y = y + ruler_h
     lanes_y = y + h - sb - lanes_h
     grid_h = max(0, lanes_y - grid_y)
-    return dict(
+    out = dict(
         ruler=(grid_x, y, grid_w, ruler_h), corner=(x, y, keys_w, ruler_h),
         keys=(x, grid_y, keys_w, grid_h), grid=(grid_x, grid_y, grid_w, grid_h),
         vbar=(x + w - sb, grid_y, sb, grid_h),
-        dac0=(grid_x, lanes_y, grid_w, dac), dac1=(grid_x, lanes_y + dac, grid_w, dac),
-        vel=(grid_x, lanes_y + 2 * dac, grid_w, vel), lane_names=(x, lanes_y, keys_w, lanes_h),
+        vel=(grid_x, lanes_y + nd * dac, grid_w, vel), lane_names=(x, lanes_y, keys_w, lanes_h),
         hbar=(grid_x, y + h - sb, grid_w, sb))
+    for i in range(nd):
+        out["dac%d" % i] = (grid_x, lanes_y + i * dac, grid_w, dac)
+    return out
+
+
+def dac_at(geo, x, y):
+    """Index of the DAC strip under (x, y), or None."""
+    i = 0
+    while "dac%d" % i in geo:
+        if contains(geo["dac%d" % i], x, y):
+            return i
+        i += 1
+    return None
 
 
 def stack_rects(center, line):

@@ -171,7 +171,9 @@ Author: Mike.  Status: design talk in progress.  Built so far: see 'Built' at th
 - A tune has 4 voices (`V1:`-`V4:`) and 2 DACs (`D1:`, `D2:`) unless its header says otherwise: `voices N` (1-16) and `dacs N` (0-8).
   `Synth(voices, dacs)`, `TunePlayer`, `Song(voices=, dacs=)`, the `.csp` song chunk (minor revision 1 stores the counts; a default song is
   stored exactly as before) and the song editor all follow the tune's counts. A voice line past the count is an error naming the header line to add.
-- Not yet: the composer's panels, tracker columns and Tracks view still show the default six tracks (slice 2); importers still keep four voices.
+- Composer (slice 2): the Tracks view, piano roll (one drum strip per DAC), tracker (columns scroll sideways when they do not fit) and the Voices
+  panel (scrolls) follow the song's counts; the number keys 1-9 pick lanes; colours repeat after the palette's six.
+- Not yet: importers still keep four voices (slice 3).
 - **Length limit:** an **event-count cap** (about 200,000 events per tune), not a time cap; a tune over the cap is refused with a
   clear message, and the music tool shows the count. Playback is streamed (the mixer renders a few seconds ahead in chunks), so a
   tune can in principle run indefinitely; a loop repeats until the music changes.

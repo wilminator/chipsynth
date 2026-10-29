@@ -29,9 +29,13 @@ def draw(app):
         ui.click, ui.pos = None, (-1, -1)
     clip(surf, lay.top)
     topbar(app)
+    app.ensure_layout()                            # the top bar's buttons may have changed the mode
+    lay = app.layout
     if lay.left[2] > 0:
         clip(surf, lay.left)
         voices(app)
+        app.ensure_layout()
+        lay = app.layout
     clip(surf, lay.center)
     if app.mode == "tracker" and app.roll is not None:
         tracker(app)
@@ -226,7 +230,13 @@ def clock(seconds):
 
 
 # ------------------------------------------------------------------ voices
-VOICE_LABEL = ("V1", "V2", "V3", "V4", "D1", "D2")
+VOICE_LABEL = ("V1", "V2", "V3", "V4", "D1", "D2")      # the default lane names; Roll.names for a song's own
+
+
+def vcol(th, i):
+    """The colour of lane i (the palette repeats for songs with more lanes than it has colours)."""
+    pal = th["voices"]
+    return pal[i % len(pal)]
 
 
 def voices(app):
@@ -237,41 +247,51 @@ def voices(app):
     pad = int(10 * s)
     text(surf, f.small, "VOICES", (x + pad, y + pad), th["dim"])
     y += pad + f.line
-    card_h = min(int(f.line * 3.0), (h - (y - r[1]) - pad) // 6 - 4)
+    n = app.roll.lanes if app.roll else 6
+    names = app.roll.names if app.roll else VOICE_LABEL
+    area = h - (y - r[1]) - pad
+    card_h = max(int(f.line * 1.7), min(int(f.line * 3.0), area // n - 4))        # tall enough to read; scrolls if not
+    total = n * (card_h + 4)
+    app.voices_scroll = max(0, min(app.voices_scroll, total - area))
+    y -= app.voices_scroll
+    clip(surf, (x, r[1] + pad + f.line, w, h - pad - f.line))
     app.voice_cards = []
     muted = app.muted_now() if app.tune else set()
     counts = app.roll.counts() if app.roll else [0] * 6
-    for i in range(6):
+    nv = app.roll.nv if app.roll else 4
+    for i in range(n):
         rect = (x + pad, y, w - 2 * pad - 2, card_h)
         app.voice_cards.append(rect)
+        y += card_h + 4
+        if rect[1] + rect[3] < r[1] + pad + f.line or rect[1] > r[1] + h:
+            continue
         sel = i == app.sel_voice
-        col = th["voices"][i]
+        col = vcol(th, i)
         dead = i in muted or counts[i] == 0
         rrect(surf, th["panel2"] if not sel else mix(th["panel2"], th["accent"], 0.18), rect, 6,
               th["accent"] if sel else th["line"])
         pygame.draw.rect(surf, col if not dead else mix(col, th["panel2"], 0.65),
                          (rect[0] + 1, rect[1] + 6, max(4, int(5 * s)), rect[3] - 12), border_radius=3)
         tx = rect[0] + int(16 * s)
-        text(surf, f.bold, VOICE_LABEL[i], (tx, rect[1] + int(6 * s)), th["text"] if not dead else th["dim"])
+        text(surf, f.bold, names[i], (tx, rect[1] + int(6 * s)), th["text"] if not dead else th["dim"])
         # M / S
         bw = int(f.line * 1.25)
         bx = rect[0] + rect[2] - 2 * bw - int(10 * s)
         by = rect[1] + int(6 * s)
-        if ui.button(surf, th, f, (bx, by, bw, bw), "M", "Mute %s (M)" % VOICE_LABEL[i], on=i in app.muted, font=f.small):
+        if ui.button(surf, th, f, (bx, by, bw, bw), "M", "Mute %s (M)" % names[i], on=i in app.muted, font=f.small):
             app.toggle_mute(i)
-        if ui.button(surf, th, f, (bx + bw + int(4 * s), by, bw, bw), "S", "Solo %s" % VOICE_LABEL[i], on=i in app.solos,
+        if ui.button(surf, th, f, (bx + bw + int(4 * s), by, bw, bw), "S", "Solo %s" % names[i], on=i in app.solos,
                      font=f.small):
             app.toggle_solo(i)
         if ui.clicked(rect) and not ui.hover((bx, by, 2 * bw + int(4 * s), bw)):
             app.sel_voice = i
-        if app.roll:
-            if i < 4:
+        if app.roll and card_h >= int(f.line * 2.4):
+            if i < nv:
                 inst = voice_inst(app, i)
                 sub = "%s   %d notes" % (inst, counts[i]) if counts[i] else "empty"
             else:
                 sub = "%d samples" % counts[i] if counts[i] else "empty"
             text(surf, f.small, sub, (tx, rect[1] + rect[3] - int(7 * s)), th["dim"], "bl", rect[2] - int(24 * s))
-        y += card_h + 4
 
 
 def voice_inst(app, i):
@@ -307,10 +327,12 @@ def tracker_geo(app):
     rn = int(line * 3.6)
     sb = max(11, int(line * 0.8))
     row_h = int(line * 1.3)
-    cw = max(10, (w - rn - sb) // 6)
+    lanes = app.roll.lanes if app.roll else 6
+    cols = max(1, min(lanes, (w - rn - sb) // int(line * 4.6)))       # columns that fit; the rest scroll sideways
+    cw = max(10, (w - rn - sb) // cols)
     rows_y = y + head
     visible = max(1, (h - head) // row_h)
-    return dict(x=x, y=y, w=w, h=h, head=head, rn=rn, sb=sb, row_h=row_h, cw=cw, rows_y=rows_y, visible=visible)
+    return dict(x=x, y=y, w=w, h=h, head=head, rn=rn, sb=sb, row_h=row_h, cw=cw, rows_y=rows_y, visible=visible, cols=cols)
 
 
 def tracker(app):
@@ -327,14 +349,16 @@ def tracker(app):
     pygame.draw.rect(surf, th["panel"], (g["x"], g["y"], g["w"], g["head"]))
     pygame.draw.line(surf, th["line"], (g["x"], g["y"] + g["head"] - 1), (g["x"] + g["w"], g["y"] + g["head"] - 1))
     text(surf, f.small, "%s rows" % M.SNAPS[app.snap_i][0], (g["x"] + 6, g["y"] + g["head"] // 2), th["dim"], "ml")
-    for c in range(6):
-        cx = x0 + c * g["cw"]
+    left = cur.left
+    shown = range(left, min(rl.lanes, left + g["cols"]))
+    for c in shown:
+        cx = x0 + (c - left) * g["cw"]
         sel = app.sel_voice == c
-        text(surf, f.bold, TR.COLUMNS[c], (cx + g["cw"] // 2, g["y"] + g["head"] // 2), th["voices"][c] if sel else mix(th["voices"][c], th["panel"], 0.35), "mc")
+        text(surf, f.bold, rl.names[c], (cx + g["cw"] // 2, g["y"] + g["head"] // 2), vcol(th, c) if sel else mix(vcol(th, c), th["panel"], 0.35), "mc")
     # rows
     first, count = cur.top, g["visible"]
-    cells = [TR.column_cells(rl, c, rt, first, count) for c in range(6)]
-    extras = [TR.row_notes(rl, c, rt, first, count) for c in range(6)]
+    cells = [TR.column_cells(rl, c, rt, first, count) for c in range(rl.lanes)]
+    extras = [TR.row_notes(rl, c, rt, first, count) for c in range(rl.lanes)]
     tick = app.playhead()
     play_row = None if tick is None else int(tick // rt)
     bt = rl.bar_ticks
@@ -353,17 +377,17 @@ def tracker(app):
             shade.fill(th["accent"] + (90,))
             surf.blit(shade, (g["x"], ry))
         text(surf, f.mono, TR.row_label(rl, r, rt), (g["x"] + g["rn"] - 8, ry + g["row_h"] // 2), th["dim"], "mr")
-        for c in range(6):
-            cx = x0 + c * g["cw"]
+        for c in shown:
+            cx = x0 + (c - left) * g["cw"]
             label, kind = cells[c][k]
             if c == cur.col and r == cur.row:
                 pygame.draw.rect(surf, th["accent"], (cx + 1, ry, g["cw"] - 2, g["row_h"]), 2, border_radius=3)
             if kind == "empty":
                 text(surf, f.mono, "...", (cx + g["cw"] // 2, ry + g["row_h"] // 2), mix(th["dim"], bg, 0.55), "mc")
             elif kind == "hold":
-                text(surf, f.mono, "|", (cx + g["cw"] // 2, ry + g["row_h"] // 2), mix(th["voices"][c], bg, 0.5), "mc")
+                text(surf, f.mono, "|", (cx + g["cw"] // 2, ry + g["row_h"] // 2), mix(vcol(th, c), bg, 0.5), "mc")
             else:
-                col = th["voices"][c] if kind == "start" else mix(th["voices"][c], bg, 0.45)
+                col = vcol(th, c) if kind == "start" else mix(vcol(th, c), bg, 0.45)
                 nt = extras[c][k]
                 if nt is None:
                     text(surf, f.mono, label, (cx + g["cw"] // 2, ry + g["row_h"] // 2), col, "mc", g["cw"] - 6)
@@ -374,7 +398,7 @@ def tracker(app):
                          mix(th["dim"], bg, 0.15 if nt.vol != 15 else 0.6), "ml", g["cw"] // 4)
                     if mark:
                         text(surf, f.mono, mark, (cx + g["cw"] - 6, ry + g["row_h"] // 2), th["accent"], "mr", g["cw"] // 5)
-    for c in range(1, 7):
+    for c in range(1, len(shown) + 1):
         pygame.draw.line(surf, th["line"], (x0 + c * g["cw"] - 1, g["rows_y"]), (x0 + c * g["cw"] - 1, g["y"] + g["h"]))
     # scroll bar
     bx = g["x"] + g["w"] - g["sb"]
@@ -450,7 +474,7 @@ def time_lines(app, rect):
 
 def note_color(app, voice, dim=False):
     th = app.th
-    c = th["voices"][voice]
+    c = vcol(th, voice)
     if voice in (app.muted_now() if app.tune else ()):
         return mix(th["dim"], th["bg"], 0.55)
     return c if not dim else mix(c, th["white_row"], 0.58)
@@ -461,7 +485,8 @@ def draw_notes(app):
     gx, gy, gw, gh = app.geo["grid"]
     clip(surf, app.geo["grid"])
     t0, t1 = v.scroll_tick, v.scroll_tick + gw / v.ppt
-    order = [i for i in range(4) if i != app.sel_voice] + ([app.sel_voice] if app.sel_voice < 4 else [])
+    nv = rl.nv
+    order = [i for i in range(nv) if i != app.sel_voice] + ([app.sel_voice] if app.sel_voice < nv else [])
     for vi in order:
         dim = vi != app.sel_voice
         col = note_color(app, vi, dim)
@@ -608,19 +633,21 @@ def draw_lanes(app):
     names = app.geo["lane_names"]
     clip(surf, names)
     surf.fill(th["panel"], names)
-    for key, label, i in (("dac0", "D1", 4), ("dac1", "D2", 5)):
-        r = app.geo[key]
-        text(surf, f.small, label, (names[0] + names[2] - 6, r[1] + r[3] // 2), th["voices"][i], "mr")
+    nv = rl.nv
+    for di in range(rl.nd):
+        r = app.geo["dac%d" % di]
+        text(surf, f.small, "D%d" % (di + 1), (names[0] + names[2] - 6, r[1] + r[3] // 2), vcol(th, nv + di), "mr")
     vr = app.geo["vel"]
     text(surf, f.small, "Volume", (names[0] + names[2] - 6, vr[1] + 4), th["dim"], "tr")
-    text(surf, f.small, VOICE_LABEL[min(app.sel_voice, 3)], (names[0] + names[2] - 6, vr[1] + 4 + f.line), th["voices"][min(app.sel_voice, 3)], "tr")
+    sv = min(app.sel_voice, nv - 1)
+    text(surf, f.small, "V%d" % (sv + 1), (names[0] + names[2] - 6, vr[1] + 4 + f.line), vcol(th, sv), "tr")
     t0, t1 = v.scroll_tick, v.scroll_tick + app.geo["grid"][2] / v.ppt
-    for di, key in enumerate(("dac0", "dac1")):
-        r = app.geo[key]
+    for di in range(rl.nd):
+        r = app.geo["dac%d" % di]
         clip(surf, r)
         surf.fill(th["white_row"] if di % 2 == 0 else th["black_row"], r)
         pygame.draw.line(surf, th["line"], (r[0], r[1]), (r[0] + r[2], r[1]))
-        col = note_color(app, 4 + di)
+        col = note_color(app, nv + di)
         for b in rl.dac[di]:
             if b.start + b.dur < t0 or b.start > t1:
                 continue
@@ -628,17 +655,17 @@ def draw_lanes(app):
             w = max(3.0, b.dur * v.ppt - 1)
             rect = pygame.Rect(int(x), r[1] + 3, int(w), r[3] - 6)
             pygame.draw.rect(surf, col, rect, border_radius=3)
-            if app.hit_sel == (4 + di, b.start):
+            if app.hit_sel == (nv + di, b.start):
                 pygame.draw.rect(surf, th["text"], rect.inflate(2, 2), 2, border_radius=4)
             if rect.w > 22:
                 text(surf, f.small, b.name, (rect.x + 4, rect.centery), th["accent_text"] if sum(col) > 380 else (255, 255, 255),
                      "ml", rect.w - 6)
     d = app.drag
     if d and d["kind"] in ("hit_new", "hit_move") and d.get("moved"):
-        r = app.geo["dac%d" % (d["lane"] - 4)]
+        r = app.geo["dac%d" % (d["lane"] - nv)]
         clip(surf, r)
         w = app.snap_ticks if d["kind"] == "hit_new" else next(
-            (b.dur for b in rl.dac[d["lane"] - 4] if b.start == d["start"]), app.snap_ticks)
+            (b.dur for b in rl.dac_of(d["lane"]) if b.start == d["start"]), app.snap_ticks)
         rect = pygame.Rect(int(v.x_of(d["new"], r[0])), r[1] + 3, int(max(3, w * v.ppt - 1)), r[3] - 6)
         pygame.draw.rect(surf, th["text"], rect, 2, border_radius=3)
     r = app.geo["vel"]
@@ -648,7 +675,7 @@ def draw_lanes(app):
     for frac in (0.25, 0.5, 0.75):
         y = r[1] + r[3] - 4 - (r[3] - 8) * frac
         pygame.draw.line(surf, th["grid"], (r[0], y), (r[0] + r[2], y))
-    for vi in [i for i in range(4) if i != app.sel_voice] + [min(app.sel_voice, 3)]:
+    for vi in [i for i in range(nv) if i != app.sel_voice] + [min(app.sel_voice, nv - 1)]:
         dim = vi != app.sel_voice
         col = note_color(app, vi, dim)
         for idx, n in enumerate(rl.notes[vi]):
@@ -756,6 +783,8 @@ def inspector(app):
     btn_row(("Loop from bar %d" % cur_bar, "Loop from the bar where Play starts (click the ruler to move it)", app.cursor_tick > 0,
              lambda: app.set_loop(app.cursor_tick)),
             ("No loop point", "Play from the start again each time", bool(t.loop_tick), lambda: app.set_loop(None)))
+    btn_row(("Trim end rests", "Cut the song down to where its last note ends: erased notes leave rests that keep it long",
+             ed.trailing_rest_ticks() > 0, app.trim_end))
     marks = ed.tempo_marks()
     text(surf, f.small, "Tempo changes", (x + pad, y + 2), th["dim"])
     y += int(f.line * 1.15)
@@ -823,8 +852,8 @@ def inspector(app):
             y += int(sq * 1.18)
     y += int(10 * s)
     vi = app.sel_voice
-    head("Voice  " + VOICE_LABEL[vi])
-    if vi < 4:
+    head("Voice  " + rl.names[vi])
+    if vi < rl.nv:
         notes = rl.notes[vi]
         if not notes:
             text(surf, f.ui, "No notes", (x + pad, y), th["dim"])
@@ -866,7 +895,7 @@ def inspector(app):
             ctl("Instrument", iname or "(default)",
                 lambda: app.pick_instrument(vi, names[(pos - 1) % len(names)]),
                 lambda: app.pick_instrument(vi, names[(pos + 1) % len(names)]), tip="pick")
-            users = [VOICE_LABEL[k] for k in range(4) if k != vi and iname and ed.voice_instrument(k) == iname]
+            users = [rl.names[k] for k in range(rl.nv) if k != vi and iname and ed.voice_instrument(k) == iname]
             bw = int(f.line * 1.25)
             if ui_button_row(app, x + pad, y, inner, bw, "Make my own copy" if iname else "Give this voice its own",
                              "Copy the instrument so changing it leaves the other voices alone"):
@@ -911,7 +940,7 @@ def inspector(app):
             row("Notes", len(notes))
             row("Range", "%s - %s" % (M.pitch_name(min(n.pitch for n in notes)), M.pitch_name(max(n.pitch for n in notes))))
     else:
-        blocks = rl.dac[vi - 4]
+        blocks = rl.dac_of(vi)
         sq = int(f.line * 1.12)
         names = app.ed.sample_names()
         ui = app.ui
@@ -1065,14 +1094,14 @@ def bottom(app):
         clip(surf, ov)
         total = float(rl.length)
         span = rl.high - rl.low + 1
-        for vi in range(4):
+        for vi in range(rl.nv):
             col = note_color(app, vi, vi != app.sel_voice)
             for n in rl.notes[vi]:
                 x = ov[0] + n.start / total * ov[2]
                 y = ov[1] + 3 + (rl.high - n.pitch) / span * (ov[3] - 8)
                 pygame.draw.rect(surf, col, (x, y, max(1.0, n.dur / total * ov[2]), max(1.5, (ov[3] - 8) / span)))
-        for di in range(2):
-            col = note_color(app, 4 + di)
+        for di in range(rl.nd):
+            col = note_color(app, rl.nv + di)
             for blk in rl.dac[di]:
                 x = ov[0] + blk.start / total * ov[2]
                 pygame.draw.rect(surf, col, (x, ov[1] + ov[3] - 4 - di * 3, max(1.0, blk.dur / total * ov[2]), 2))
@@ -1100,7 +1129,7 @@ def bottom(app):
         msg, col = ui.tip, th["text"]
     elif app.note_hover and app.roll:
         n = app.roll.notes[app.note_hover[0]][app.note_hover[1]]
-        msg = "%s  %s  bar %d  %.2f beats  vol %d  %s%s" % (VOICE_LABEL[n.voice], M.pitch_name(n.pitch),
+        msg = "%s  %s  bar %d  %.2f beats  vol %d  %s%s" % (app.roll.names[n.voice], M.pitch_name(n.pitch),
                                                         n.start // max(1, rl.bar_ticks) + 1, n.dur / M.BEAT, n.vol, n.inst,
                                                         "" if n.fx == "none" else "  " + n.fx)
         col = th["text"]
@@ -1398,14 +1427,14 @@ def stack_notes(app, i, y0, row):
 
 
 def stack_hits(app, i, y0):
-    """The drum hits of lane `i` (4 = D1, 5 = D2)."""
+    """The drum hits of lane `i` (a DAC lane: nv + the DAC's index)."""
     surf, th, v, rl, f = app.screen, app.th, app.view, app.roll, app.fonts
     gx, gy, gw, gh = app.geo["grid"]
     t0, t1 = v.scroll_tick, v.scroll_tick + gw / v.ppt
     col = note_color(app, i)
     h = app.stack.height
     pad = max(2, h // 8)
-    for b in rl.dac[i - 4]:
+    for b in rl.dac_of(i):
         if b.start + b.dur < t0 or b.start > t1:
             continue
         rect = pygame.Rect(int(v.x_of(b.start, gx)), int(y0 + pad), int(max(3.0, b.dur * v.ppt - 1)), int(h - 2 * pad))
@@ -1438,7 +1467,7 @@ def stack_ghost(app):
     elif d["kind"] in ("hit_new", "hit_move"):
         i = d["lane"]
         w = app.snap_ticks if d["kind"] == "hit_new" else next(
-            (b.dur for b in app.roll.dac[i - 4] if b.start == d["start"]), app.snap_ticks)
+            (b.dur for b in app.roll.dac_of(i) if b.start == d["start"]), app.snap_ticks)
         pad = max(2, st.height // 8)
         rect = pygame.Rect(int(v.x_of(d["new"], gx)), int(gy + st.top_of(i) + pad), int(max(3, w * v.ppt - 1)),
                            int(st.height - 2 * pad))
@@ -1461,32 +1490,33 @@ def stack_heads(app):
     muted = app.muted_now() if app.tune else set()
     counts = app.roll.counts()
     app.voice_cards = [None] * st.count
+    names, nv = app.roll.names, app.roll.nv
     for i, top in st.visible(hh):
         rect = pygame.Rect(hx + 3, hy + top + 2, hw - 7, st.height - 4)
         app.voice_cards[i] = tuple(rect)
         sel = i == app.sel_voice
-        col = th["voices"][i]
+        col = vcol(th, i)
         dead = i in muted or counts[i] == 0
         rrect(surf, th["panel2"] if not sel else mix(th["panel2"], th["accent"], 0.18), tuple(rect), 6,
               th["accent"] if sel else th["line"])
         pygame.draw.rect(surf, col if not dead else mix(col, th["panel2"], 0.65),
                          (rect.x + 1, rect.y + 6, max(4, int(5 * s)), max(4, rect.h - 12)), border_radius=3)
         tx = rect.x + int(16 * s)
-        text(surf, f.bold, VOICE_LABEL[i], (tx, rect.y + int(6 * s)), th["text"] if not dead else th["dim"])
+        text(surf, f.bold, names[i], (tx, rect.y + int(6 * s)), th["text"] if not dead else th["dim"])
         bw = int(f.line * 1.25)
         bx = rect.right - 2 * bw - int(10 * s)
         by = rect.y + int(6 * s)
         buttons_ok = by + bw <= hy + hh and by >= hy
         if buttons_ok:
-            if ui.button(surf, th, f, (bx, by, bw, bw), "M", "Mute %s (M)" % VOICE_LABEL[i], on=i in app.muted, font=f.small):
+            if ui.button(surf, th, f, (bx, by, bw, bw), "M", "Mute %s (M)" % names[i], on=i in app.muted, font=f.small):
                 app.toggle_mute(i)
-            if ui.button(surf, th, f, (bx + bw + int(4 * s), by, bw, bw), "S", "Solo %s" % VOICE_LABEL[i], on=i in app.solos,
+            if ui.button(surf, th, f, (bx + bw + int(4 * s), by, bw, bw), "S", "Solo %s" % names[i], on=i in app.solos,
                          font=f.small):
                 app.toggle_solo(i)
         if ui.clicked(tuple(rect)) and not (buttons_ok and ui.hover((bx, by, 2 * bw + int(4 * s), bw))):
             app.sel_voice = i
         if st.height >= int(f.line * 2.6):
-            if i < 4:
+            if i < nv:
                 inst = voice_inst(app, i)
                 sub = "%s   %d notes" % (inst, counts[i]) if counts[i] else "empty"
             else:
