@@ -274,3 +274,184 @@ class OpenMidiTests(unittest.TestCase):
         self.assertEqual(a.roll.nv, 6)
         self.assertIn("6 voices", a.message)
         self.assertNotIn("four", a.message)
+
+
+class SwitchGuardTests(unittest.TestCase):
+    """Switching songs must not lose edits: a dirty song is saved first (or explicitly set aside)."""
+
+    def make(self):
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        for name in ("a", "b"):
+            (d / (name + ".mml")).write_text("V1: c d e f\n")
+        a = Composer(screen, Prefs(view="roll"), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        self.assertTrue(a.open_path(d / "a.mml"))
+        a.frame()
+        return a, d
+
+    def edit(self, a):
+        a.edit(lambda: a.ed.set_tempo_at(0, 77))
+        self.assertTrue(a.song_dirty)
+
+    def test_clean_song_switches_at_once(self):
+        a, d = self.make()
+        self.assertTrue(a.open_path(d / "b.mml"))
+        self.assertEqual(Path(a.source).name, "b.mml")
+        self.assertIsNone(a.overlay)
+
+    def test_dirty_song_asks_and_does_not_switch(self):
+        a, d = self.make()
+        self.edit(a)
+        self.assertFalse(a.open_path(d / "b.mml"))
+        self.assertEqual(a.overlay, "unsaved")
+        self.assertEqual(Path(a.source).name, "a.mml")
+        a.frame()                                  # the dialog draws
+
+    def test_save_writes_the_edit_then_switches(self):
+        a, d = self.make()
+        self.edit(a)
+        a.open_path(d / "b.mml")
+        self.assertTrue(a.finish_unsaved("save"))
+        self.assertEqual(Path(a.source).name, "b.mml")
+        self.assertIn("77", (d / "a.mml").read_text())
+        self.assertIsNone(a.overlay)
+
+    def test_cancel_keeps_song_and_edits(self):
+        a, d = self.make()
+        self.edit(a)
+        a.open_path(d / "b.mml")
+        a.finish_unsaved("cancel")
+        self.assertEqual(Path(a.source).name, "a.mml")
+        self.assertTrue(a.song_dirty)
+        self.assertIsNone(a.overlay)
+
+    def test_failed_save_stays_put(self):
+        a, d = self.make()
+        self.edit(a)
+        a.open_path(d / "b.mml")
+        a.save = lambda path=None: False
+        self.assertFalse(a.finish_unsaved("save"))
+        self.assertEqual(a.overlay, "unsaved")
+        self.assertEqual(Path(a.source).name, "a.mml")
+
+    def test_discard_switches(self):
+        a, d = self.make()
+        self.edit(a)
+        a.open_path(d / "b.mml")
+        self.assertTrue(a.finish_unsaved("discard"))
+        self.assertEqual(Path(a.source).name, "b.mml")
+        self.assertNotIn("77", (d / "a.mml").read_text())
+
+    def test_new_song_dialog_is_guarded_too(self):
+        a, d = self.make()
+        self.edit(a)
+        a.new_from_generator_dialog()
+        self.assertEqual(a.overlay, "unsaved")
+        a.finish_unsaved("cancel")
+        self.assertIsNone(a.overlay)
+
+
+class CollapseVoicesTests(unittest.TestCase):
+    TEXT = ("voices 6\nV1: l4 c d e f c d e f\nV2: l4 e f g a e f g a\nV3: l4 g a b > c < g a b > c <\n"
+            "V4: l4 c c c c c c c c\nV5: r1 l4 d d d d\nV6: r4 e r4 e r4 e r4 e r1\n")
+
+    def editor(self, text=None):
+        from chipsynth.songedit import Editor
+        return Editor(Song.from_mml(text or self.TEXT))
+
+    def count(self, ed, v, t0=0, t1=10 ** 6):
+        return sum(1 for n in ed.tune.voices[v] if t0 <= n.start < t1)
+
+    def test_plan_keeps_target_voices_and_does_not_change_the_song(self):
+        ed = self.editor()
+        before = ed.song.to_mml()
+        plan = ed.collapse_plan(0, ed.tune.length, 4)
+        self.assertEqual(len(plan["kept"]), 4)
+        self.assertEqual(ed.song.to_mml(), before)
+        self.assertEqual(len(plan["moves"]) + len(plan["lost"]), sum(self.count(ed, v) for v in range(6) if v not in plan["kept"]))
+
+    def test_collapse_empties_the_dropped_voices_and_is_one_undo(self):
+        ed = self.editor()
+        plan = ed.collapse_voices(0, ed.tune.length, 4)
+        for v in range(6):
+            if v not in plan["kept"]:
+                self.assertEqual(self.count(ed, v), 0)
+        self.assertTrue(ed.undo())
+        self.assertEqual(self.count(ed, 4), 4)
+
+    def test_only_the_chosen_bars_change(self):
+        ed = self.editor()
+        bt = ed.tune.bar_ticks
+        ed.collapse_voices(bt, 2 * bt, 4)
+        # voices that start outside bar 2 keep those notes
+        self.assertGreater(sum(self.count(ed, v, 2 * bt) + self.count(ed, v, 0, bt) for v in range(6)), 0)
+
+    def test_nothing_to_do_is_refused(self):
+        from chipsynth.songedit import EditError
+        ed = self.editor("voices 2\nV1: c d\nV2: e f\n")
+        with self.assertRaises(EditError):
+            ed.collapse_voices(0, ed.tune.length, 4)
+
+    def test_notes_with_no_gap_are_reported_as_lost(self):
+        ed = self.editor("voices 3\nV1: c1\nV2: e1\nV3: g1\n")
+        plan = ed.collapse_voices(0, ed.tune.length, 2)
+        self.assertEqual(len(plan["lost"]), 1)
+
+    def test_paste_can_reach_every_voice(self):
+        ed = self.editor()
+        ed.paste_notes([(0, 0, 24, 60)], 600, voice_shift=5)    # used to refuse anything above voice 4
+
+    def test_the_dialog_applies_in_the_composer(self):
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        a = Composer(screen, Prefs(view="roll"), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        a.load_song(Song.from_mml(self.TEXT), "t", "", "t")
+        a.frame()
+        a.collapse_open()
+        self.assertEqual(a.overlay, "collapse")
+        a.frame()
+        a.collapse_step(-1)
+        self.assertEqual(a.collapse["target"], 3)
+        a.collapse_apply()
+        self.assertIsNone(a.overlay)
+        self.assertLessEqual(sum(1 for v in range(6) if a.tune.voices[v]), 3)
+        self.assertTrue(a.song_dirty)
+
+
+class MarqueeAcrossVoicesTests(unittest.TestCase):
+    def make(self):
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        a = Composer(screen, Prefs(view="stack"), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        text = "voices 6\n" + "\n".join("V%d: l4 c d e f c d e f" % i for i in range(1, 7)) + "\n"
+        a.load_song(Song.from_mml(text), "t", "", "t")
+        a.frame()
+        a.set_mode("stack")
+        a.frame()
+        return a
+
+    def box(self, a, lanes, bars):
+        g = a.geo["grid"]
+        bt = a.tune.bar_ticks
+        x = lambda tick: int(g[0] + (tick - a.view.scroll_tick) * a.view.ppt)
+        h = a.stack.height
+        a.drag = dict(kind="marquee", at=(x(0) + 1, g[1] + lanes[0] * h + 1), to=(x(bars * bt) - 1, g[1] + (lanes[1] + 1) * h - 2), add=False)
+        a.finish_marquee(a.drag)
+        return {v for v, _ in a.selection()}
+
+    def test_one_bar_over_many_voices(self):
+        a = self.make()
+        got = self.box(a, (0, 3), 1)
+        self.assertEqual(got, {0, 1, 2, 3})
+
+    def test_one_voice_over_many_bars(self):
+        a = self.make()
+        got = self.box(a, (1, 1), 2)
+        self.assertEqual(got, {1})
+        self.assertGreater(len(a.selection()), 4)

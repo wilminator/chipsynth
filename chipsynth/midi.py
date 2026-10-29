@@ -145,6 +145,23 @@ def _parse_track(body):
     return ev
 
 
+def _layers(notes, q):
+    """Split one track / channel into single-note layers: when it plays chords or overlapping notes, the top note
+    of each stays in the first layer and the others go to the layers below, so no note is thrown away here."""
+    layers, busy = [], []
+    for s, e, p in sorted(notes, key=lambda n: (n[0], -n[2])):
+        a, b = q(s), max(q(e), q(s) + GRID)
+        for k, spans in enumerate(busy):
+            if all(b <= x or a >= y for x, y in spans):
+                spans.append((a, b))
+                layers[k].append((s, e, p))
+                break
+        else:
+            busy.append([(a, b)])
+            layers.append([(s, e, p)])
+    return [sorted(l) for l in layers]
+
+
 def rank_parts(parts):
     """Part indexes, most important first: the part that sounds longest (a lead or a bass line that plays all the way
     through), then the higher one (the melody sits on top)."""
@@ -206,7 +223,7 @@ def from_midi(data, voices=None):
             elif kind in ("on", "off") and ch == 9:
                 drums += 1
         for ch, ns in sorted(notes.items()):
-            found.append(sorted(ns))
+            found.extend(_layers(sorted(ns), q))
     parts = [v for v in found if v]
     if not parts:
         raise MidiError("the file has no notes")

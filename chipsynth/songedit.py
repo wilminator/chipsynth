@@ -347,7 +347,7 @@ class Editor:
             out = []
             for v, start, dur, pitch in clip:
                 v2 = v + voice_shift
-                if not 0 <= v2 <= 3:
+                if not 0 <= v2 < self.tune.nvoices:
                     raise EditError("there is no such voice")
                 t = tick + start - base
                 self._clear(v2, t, t + dur)
@@ -355,6 +355,58 @@ class Editor:
                 out.append((v2, t))
             return out
         return self.change("paste", run)
+
+    # ---- collapsing voices
+    def collapse_plan(self, t0, t1, target=4, voices=None):
+        """What `collapse_voices` would do, without doing it.  The notes that start in [t0, t1) of `voices` (default: every
+        voice) are squeezed into the `target` most important voices: those that sound longest there, then the higher
+        ones.  Each note of the others goes into a gap of a kept voice (the one nearest in pitch); a note that finds no gap
+        is left out, the more important voices placing theirs first.  Returns {"kept": [voice], "moves": [(voice,
+        start, dur, pitch, to_voice)], "lost": [(voice, start, dur, pitch)], "range": (t0, t1), "target": n}."""
+        from .midi import rank_parts
+        nv = self.tune.nvoices
+        voices = list(range(nv)) if voices is None else [v for v in voices if 0 <= v < nv]
+        target = max(1, int(target))
+        inside = {}
+        for v in voices:
+            ns = [(n.start, n.start + n.dur, n.pitch) for n in self.tune.voices[v] if t0 <= n.start < t1]
+            if ns:
+                inside[v] = ns
+        ids = sorted(inside)
+        order = [ids[i] for i in rank_parts([inside[v] for v in ids])]
+        kept, dropped = sorted(order[:target]), order[target:]
+        plan = {"kept": kept, "moves": [], "lost": [], "range": (t0, t1), "target": target}
+        busy = {v: [(n.start, n.start + n.dur) for n in self.tune.voices[v]] for v in kept}
+        mean = {v: sum(p for _, _, p in inside[v]) / len(inside[v]) for v in kept}
+
+        def free(spans, a, b):
+            return all(b <= x or a >= y for x, y in spans)
+        for src in dropped:
+            for start, end, pitch in sorted(inside[src]):
+                for dst in sorted(kept, key=lambda v: (abs(mean[v] - pitch), order.index(v))):
+                    if free(busy[dst], start, end):
+                        busy[dst].append((start, end))
+                        plan["moves"].append((src, start, end - start, pitch, dst))
+                        break
+                else:
+                    plan["lost"].append((src, start, end - start, pitch))
+        return plan
+
+    def collapse_voices(self, t0, t1, target=4, voices=None):
+        """Squeeze the notes that start in [t0, t1) into `target` voices (see collapse_plan).  One undo step.  Returns
+        the plan that was carried out."""
+        def run():
+            plan = self.collapse_plan(t0, t1, target, voices)
+            if not plan["moves"] and not plan["lost"]:
+                raise EditError("those bars already use %d voice%s or fewer" % (target, "" if target == 1 else "s"))
+            for src, start, dur, pitch, dst in plan["moves"]:
+                self._erase_at(src, start)
+            for src, start, dur, pitch in plan["lost"]:
+                self._erase_at(src, start)
+            for src, start, dur, pitch, dst in plan["moves"]:
+                self._add(dst, start, dur, pitch)
+            return plan
+        return self.change("collapse voices", run)
 
     def put_note(self, voice, tick, pitch, dur):
         """Tracker-style entry: sound `pitch` at `tick` for up to `dur` ticks.  A note that starts there changes

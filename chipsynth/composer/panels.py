@@ -60,6 +60,10 @@ def draw(app):
         prompt_overlay(app)
     elif app.overlay == "new":
         new_overlay(app)
+    elif app.overlay == "unsaved":
+        unsaved_overlay(app)
+    elif app.overlay == "collapse":
+        collapse_overlay(app)
 
 
 def clip(surf, rect):
@@ -802,6 +806,8 @@ def inspector(app):
              ed.trailing_rest_ticks() > 0, app.trim_end),
             ("End at bar %d" % cur_bar, "End the song where Play starts (click the ruler to move it): everything after goes",
              0 < app.cursor_tick < t.length, app.cut_here))
+    btn_row(("Collapse voices...", "Squeeze the selected bars (or the whole song) into fewer voices, pouring extra notes into gaps",
+             t.nvoices > 1, app.collapse_open))
     marks = ed.tempo_marks()
     text(surf, f.small, "Tempo changes", (x + pad, y + 2), th["dim"])
     y += int(f.line * 1.15)
@@ -1206,7 +1212,8 @@ def songs_overlay(app):
         text(surf, f.small, ref.id, (row.right - 10, row.centery), th["accent_text"] if cur else th["dim"], "mr", row.w // 2 - 20)
         if ui.clicked(row) and body.collidepoint(ui.pos):
             app.overlay = None
-            app.open_song_id(ref.id)
+            if ref.id != app.song_id:
+                app.open_song_id(ref.id)
         y += int(f.line * 1.4)
     if app.packages.problems:
         y += 6
@@ -1233,6 +1240,68 @@ def prompt_overlay(app):
         app.finish_prompt(True)
     if ui.button(surf, th, f, (r.right - pad - 2 * bw - 8, y, bw, int(f.line * 1.3)), "Cancel", "Esc"):
         app.finish_prompt(False)
+    surf.set_clip(None)
+
+
+def collapse_overlay(app):
+    """Collapse voices: pick how many voices to keep, see what would move and what would be left out, then apply."""
+    surf, th, f, ui, s = app.screen, app.th, app.fonts, app.ui, app.scale
+    sw, sh = surf.get_size()
+    c = app.collapse
+    plan = c["plan"]
+    r = modal(app, min(sw - 80, int(600 * s)), int(f.line * 9.5))
+    pad = int(16 * s)
+    y = r.y + pad
+    text(surf, f.bold, "Collapse voices", (r.x + pad, y), th["text"])
+    y += int(f.line * 1.6)
+    text(surf, f.ui, "Squeeze %s into" % c["label"], (r.x + pad, y + 2), th["text"])
+    sq = int(f.line * 1.3)
+    bx = r.right - pad - 3 * sq - 8
+    if ui.button(surf, th, f, (bx, y, sq, sq), "-", "Fewer voices (Left)"):
+        app.collapse_step(-1)
+    text(surf, f.bold, "%d voices" % c["target"], (bx + sq + 4 + int(28 * s), y + sq // 2), th["text"], "mc")
+    if ui.button(surf, th, f, (r.right - pad - sq, y, sq, sq), "+", "More voices (Right)"):
+        app.collapse_step(1)
+    y += int(f.line * 1.9)
+    kept = ", ".join(str(v + 1) for v in plan["kept"]) or "none"
+    text(surf, f.ui, "Keeps voices %s." % kept, (r.x + pad, y), th["dim"], "tl", r.w - 2 * pad)
+    y += int(f.line * 1.3)
+    if not plan["moves"] and not plan["lost"]:
+        text(surf, f.ui, "Those bars already fit.", (r.x + pad, y), th["dim"], "tl", r.w - 2 * pad)
+    else:
+        text(surf, f.ui, "%d notes move into gaps of the kept voices." % len(plan["moves"]), (r.x + pad, y), th["text"], "tl", r.w - 2 * pad)
+        y += int(f.line * 1.3)
+        text(surf, f.ui, ("%d notes have no room and are left out." % len(plan["lost"])) if plan["lost"] else "No notes are left out.",
+             (r.x + pad, y), th["warn"] if plan["lost"] else th["dim"], "tl", r.w - 2 * pad)
+    bw = int(110 * s)
+    h = int(f.line * 1.3)
+    y = r.bottom - pad - h
+    if ui.button(surf, th, f, (r.right - pad - bw, y, bw, h), "Collapse", "Enter"):
+        app.collapse_apply()
+    if ui.button(surf, th, f, (r.right - pad - 2 * bw - 8, y, bw, h), "Cancel", "Esc"):
+        app.overlay = None
+    surf.set_clip(None)
+
+
+def unsaved_overlay(app):
+    """Switching songs with unsaved edits: Save (and switch), Don't save, or Cancel."""
+    surf, th, f, ui, s = app.screen, app.th, app.fonts, app.ui, app.scale
+    sw, sh = surf.get_size()
+    r = modal(app, min(sw - 80, int(560 * s)), int(f.line * 6.4))
+    pad = int(16 * s)
+    what = app.pending[1] if app.pending else "switch songs"
+    text(surf, f.bold, "Save your changes first?", (r.x + pad, r.y + pad), th["text"])
+    text(surf, f.ui, "\"%s\" has unsaved edits. Save them to %s." % (app.song.title or app.song_id or "This song", what),
+         (r.x + pad, r.y + pad + int(f.line * 1.5)), th["dim"], "tl", r.w - 2 * pad)
+    bw = int(120 * s)
+    y = r.bottom - pad - int(f.line * 1.3)
+    h = int(f.line * 1.3)
+    if ui.button(surf, th, f, (r.right - pad - bw, y, bw, h), "Save", "Enter"):
+        app.finish_unsaved("save")
+    if ui.button(surf, th, f, (r.right - pad - 2 * bw - 8, y, bw, h), "Don't save", "D"):
+        app.finish_unsaved("discard")
+    if ui.button(surf, th, f, (r.right - pad - 3 * bw - 16, y, bw, h), "Cancel", "Esc"):
+        app.finish_unsaved("cancel")
     surf.set_clip(None)
 
 

@@ -11,6 +11,35 @@ from chipsynth.song import Song
 from chipsynth.__main__ import main
 
 
+def _chord_file(pitches, length=96):
+    """A one-track, one-channel MIDI file playing all `pitches` together for `length` ticks (PPQ 96)."""
+    def vlq(n):
+        out = [n & 0x7F]
+        while n >> 7:
+            n >>= 7
+            out.append(0x80 | (n & 0x7F))
+        return bytes(reversed(out))
+    body = b"".join(b"\x00\x90" + bytes([p, 100]) for p in pitches)
+    body += vlq(length) + b"\x80" + bytes([pitches[0], 0])
+    body += b"".join(b"\x00\x80" + bytes([p, 0]) for p in pitches[1:])
+    body += b"\x00\xff\x2f\x00"
+    return b"MThd" + struct.pack(">IHHH", 6, 0, 1, 96) + b"MTrk" + struct.pack(">I", len(body)) + body
+
+
+class ChordSplitTests(unittest.TestCase):
+    def test_a_chord_on_one_channel_spreads_over_voices(self):
+        song = midi.from_midi(_chord_file([60, 64, 67]))
+        self.assertEqual(song.voices, 3)
+        tune = song.compile()
+        self.assertEqual(sorted(notes(tune, v)[0][2] for v in range(3)), [60, 64, 67])
+        self.assertEqual(notes(tune, 0)[0][2], 67)          # the top note stays in the first voice
+
+    def test_with_fewer_voices_the_extra_chord_notes_have_nowhere_to_go(self):
+        song = midi.from_midi(_chord_file([60, 64, 67]), voices=2)
+        self.assertEqual(song.voices, 2)
+        self.assertTrue(any("left out" in w for w in song.warnings))
+
+
 def notes(tune, v):
     return [(n.start, n.dur, n.pitch) for n in tune.voices[v]]
 

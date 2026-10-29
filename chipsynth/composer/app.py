@@ -85,7 +85,7 @@ class Composer:
         self.note_sel = None                 # (voice, index into roll.notes[voice])
         self.note_hover = None
         self.drag = None
-        self.overlay = None                  # None | "songs" | "help" | "prompt" | "new"
+        self.overlay = None                  # None | "songs" | "help" | "prompt" | "new" | "unsaved" | "collapse"
         self.overlay_scroll = 0
         self.insp_scroll = 0
         self.message, self.message_until = "", 0.0
@@ -98,6 +98,8 @@ class Composer:
         self.ed = None                       # the Editor (the Song with undo/redo)
         self.snap_i = 1
         self.quit_warned = False
+        self.pending = None
+        self.collapse = None
         self.sample_name = ""               # what a click in a drum lane places
         self.hit_sel = None                  # (lane, start tick) of the picked drum hit
         self.multi = set()                   # several picked notes: {(voice, start tick)}
@@ -190,7 +192,69 @@ class Composer:
     def inst_name(self, inst):
         return self.inst_names.get(dataclasses.astuple(inst), "custom")
 
-    def open_song_id(self, song_id):
+    def guard_switch(self, action, what="open another song"):
+        """Run `action` (something that replaces the loaded song) now when nothing is unsaved; otherwise ask first.
+        The Unsaved dialog offers Save (then `action` runs, but only if the save worked), Don't save, or Cancel."""
+        if not self.song_dirty:
+            return action()
+        self.pending = (action, what)
+        self.overlay = "unsaved"
+        return False
+
+    # ---- collapse voices
+    def collapse_range(self):
+        """(from tick, to tick, text): the bars the selected notes span, else the whole song."""
+        bt = max(1, self.tune.bar_ticks)
+        notes = self.ed.selection_notes(sorted(self.selection())) if self.ed else []
+        if not notes:
+            return 0, max(bt, self.tune.length), "the whole song"
+        b0 = min(n[1] for n in notes) // bt
+        b1 = -(-max(n[1] + n[2] for n in notes) // bt)
+        return b0 * bt, b1 * bt, ("bar %d" % (b0 + 1) if b1 - b0 == 1 else "bars %d-%d" % (b0 + 1, b1))
+
+    def collapse_open(self):
+        if self.ed is None or self.tune.nvoices < 2:
+            self.say("There is only one voice.", 3.0)
+            return
+        t0, t1, label = self.collapse_range()
+        self.collapse = {"t0": t0, "t1": t1, "label": label, "target": min(4, self.tune.nvoices - 1), "plan": None}
+        self.collapse_plan()
+        self.overlay = "collapse"
+
+    def collapse_plan(self):
+        c = self.collapse
+        c["plan"] = self.ed.collapse_plan(c["t0"], c["t1"], c["target"])
+
+    def collapse_step(self, d):
+        c = self.collapse
+        c["target"] = max(1, min(self.tune.nvoices - 1, c["target"] + d))
+        self.collapse_plan()
+
+    def collapse_apply(self):
+        c = self.collapse
+        self.overlay = None
+        if self.edit(lambda: self.ed.collapse_voices(c["t0"], c["t1"], c["target"]), None):
+            plan = self.last_result
+            self.multi = set()
+            self.note_sel = None
+            self.say("Collapsed %s to %d voices: %d notes moved%s." % (
+                c["label"], c["target"], len(plan["moves"]),
+                ", %d left out" % len(plan["lost"]) if plan["lost"] else ""), 6.0)
+
+    def finish_unsaved(self, choice):
+        """choice: 'save', 'discard' or 'cancel'."""
+        action, _ = self.pending or (None, "")
+        if choice == "cancel" or action is None:
+            self.pending, self.overlay = None, None
+            return False
+        if choice == "save" and not self.save():
+            return False                    # save failed or was cancelled: stay here, edits intact
+        self.pending, self.overlay = None, None
+        return action()
+
+    def open_song_id(self, song_id, guard=True):
+        if guard and self.song_dirty:
+            return self.guard_switch(lambda: self.open_song_id(song_id, guard=False))
         try:
             song = self.packages.get(song_id)
         except PackageError as e:
@@ -199,7 +263,9 @@ class Composer:
         ref = next((r for r in self.packages.songs() if r.id == song_id), None)
         return self.load_song(song, ref.title if ref else song_id, ref.path if ref else "", song_id)
 
-    def open_path(self, path):
+    def open_path(self, path, guard=True):
+        if guard and self.song_dirty:
+            return self.guard_switch(lambda: self.open_path(path, guard=False))
         p = Path(path)
         try:
             if p.suffix.lower() == ".csp":
@@ -210,7 +276,7 @@ class Composer:
                 if name is None:
                     name = self.packages.add(p).name
                 ids = [r.id for r in self.packages.songs() if r.package == name]
-                return bool(ids) and self.open_song_id(ids[0])
+                return bool(ids) and self.open_song_id(ids[0], guard=False)
             if p.suffix.lower() in (".mid", ".midi"):
                 song = midi.from_midi(p.read_bytes())
                 self.say("Imported %s: %d voice%s%s. Save to keep it." % (p.name, song.voices, "" if song.voices == 1 else "s",
@@ -613,6 +679,24 @@ class Composer:
         ctrl = mods & pygame.KMOD_CTRL
         if self.overlay == "new":
             self.new_dialog_key(e)
+            return
+        if self.overlay == "collapse":
+            if k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                self.collapse_apply()
+            elif k == pygame.K_ESCAPE:
+                self.overlay = None
+            elif k in (pygame.K_LEFT, pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_DOWN):
+                self.collapse_step(-1)
+            elif k in (pygame.K_RIGHT, pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_UP):
+                self.collapse_step(1)
+            return
+        if self.overlay == "unsaved":
+            if k in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_s):
+                self.finish_unsaved("save")
+            elif k == pygame.K_ESCAPE:
+                self.finish_unsaved("cancel")
+            elif k == pygame.K_d:
+                self.finish_unsaved("discard")
             return
         if self.prompt:
             if k == pygame.K_RETURN or k == pygame.K_KP_ENTER:
@@ -1121,12 +1205,21 @@ class Composer:
         g = self.geo["grid"]
         (x0, y0), (x1, y1) = d["at"], d["to"]
         t0, t1 = sorted((self.view.tick_at(x0, g[0]), self.view.tick_at(x1, g[0])))
-        v = min(self.sel_voice, self.roll.nv - 1)
-        if self.mode == "stack":                              # pitches as the picked lane shows them
-            p0, p1 = sorted((self.stack.pitch_at(v, y0 - g[1], self.roll), self.stack.pitch_at(v, y1 - g[1], self.roll)))
+        if self.mode == "stack":                              # every lane the box touches, pitches as each lane shows them
+            area_h = g[3]
+            ya, yb = sorted((max(0, min(area_h - 1, y0 - g[1])), max(0, min(area_h - 1, y1 - g[1]))))
+            la, lb = self.stack.track_at(ya, area_h), self.stack.track_at(yb, area_h)
+            got = set()
+            if la is not None and lb is not None:
+                for v in range(la, min(lb, self.roll.nv - 1) + 1):
+                    top = self.stack.top_of(v)
+                    lo_y, hi_y = max(ya, top), min(yb, top + self.stack.height - 1)
+                    p0, p1 = sorted((self.stack.pitch_at(v, lo_y, self.roll), self.stack.pitch_at(v, hi_y, self.roll)))
+                    got |= {(v, n.start) for n in self.roll.notes[v] if n.start < t1 and n.start + n.dur > t0 and p0 <= n.pitch <= p1}
         else:
+            v = min(self.sel_voice, self.roll.nv - 1)
             p0, p1 = sorted((self.view.pitch_at(y0, g[1]), self.view.pitch_at(y1, g[1])))
-        got = {(v, n.start) for n in self.roll.notes[v] if n.start < t1 and n.start + n.dur > t0 and p0 <= n.pitch <= p1}
+            got = {(v, n.start) for n in self.roll.notes[v] if n.start < t1 and n.start + n.dur > t0 and p0 <= n.pitch <= p1}
         self.set_selection((self.selection() | got) if d["add"] else got)
         if got:
             self.say("%d note%s selected" % (len(got), "" if len(got) == 1 else "s"), 2.0)
@@ -1248,11 +1341,9 @@ class Composer:
 
     def new_from_generator_dialog(self):
         """Ctrl+N / New: open the New-song dialog (kind, mood, seed); OK opens the generated tune as a new, unsaved song."""
-        if self.song_dirty and not getattr(self, "new_warned", False):
-            self.new_warned = True
-            self.say("This song has unsaved edits. Save first, or choose New again to leave them behind.", 5.0)
+        if self.song_dirty:
+            self.guard_switch(self.new_from_generator_dialog, "start a new song")
             return
-        self.new_warned = False
         self.newdlg["seed"] = str(random.randint(1, 9999))
         self.newdlg["focus"] = "kind"
         self.ui.dd_open = None
