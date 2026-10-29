@@ -408,6 +408,12 @@ class Package:
             raise PackageError("no song '%s' in package '%s'" % (song_id, self.name))
         return self.songs[song_id].compile(self.library(base))
 
+    @staticmethod
+    def safe_id(text, default="song"):
+        """`text` (a file name, say) as a song id: every character an id may not hold becomes `_`."""
+        import re
+        return re.sub(r"[^A-Za-z0-9_.-]", "_", str(text)) or default
+
     def add_song(self, song_id, song, lib=None):
         """Store a copy of `song` under `song_id`, with everything it uses from `lib` (instruments, effect sets,
         scales, samples) copied in, so the package plays without the library."""
