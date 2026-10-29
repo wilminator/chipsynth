@@ -102,6 +102,32 @@ class ImportTests(Base):
         self.assertEqual(list(pkg.songs), ["a"])
 
 
+class ImportMidiVoicesTests(Base):
+    def midi(self):
+        from chipsynth import midi
+        from chipsynth.song import Song
+        text = "voices 6\n" + "\n".join("V%d: l1 %s" % (i, "c" * i) for i in range(1, 7)) + "\n"
+        p = self.tmp / "big.mid"
+        p.write_bytes(midi.to_midi(Song.from_mml(text).compile()))
+        return p
+
+    def voices_of(self, pkg_path):
+        from chipsynth import package as pk
+        pkg = pk.load(pkg_path)
+        return pkg.songs["big"].voices if hasattr(pkg.songs["big"], "voices") else pk.decode_song(pkg.songs["big"]).voices
+
+    def test_a_midi_file_keeps_all_its_parts_by_default(self):
+        path = self.tmp / "m.csp"
+        self.assertEqual(run("import", path, self.midi())[0], 0)
+        self.assertEqual(self.voices_of(path), 6)
+
+    def test_voices_option_makes_a_song_of_that_size(self):
+        path = self.tmp / "m.csp"
+        rc, out, err = run("import", path, self.midi(), "--voices", "4")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.voices_of(path), 4)
+
+
 class ListTests(Base):
     def setUp(self):
         super().setUp()

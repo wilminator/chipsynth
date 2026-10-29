@@ -3,7 +3,8 @@
 """Standard MIDI files in and out (format 0 / 1 read, format 1 written).
 
     data = to_midi(tune)               # a Tune -> .mid bytes: a tempo track, then one track per voice that has notes
-    song = from_midi(data)             # .mid bytes -> a Song (the first four tracks / channels with notes)
+    song = from_midi(data)             # .mid bytes -> a Song with a voice for every track / channel that has notes (up to 16)
+    song = from_midi(data, voices=4)   # ... or only 4 voices: the most important parts, with the others' notes poured into their gaps
 
 Our time is 96 ticks to a quarter note, which is exactly the file's division on the way out.  Coming in, times are
 rounded to 1/32 notes (12 ticks) so every length can be written as MML.  Drums (channel 10) are left out, and a voice is one
@@ -14,6 +15,8 @@ import struct
 from .song import Song, Note, Rest, Octave, Tempo, SongError
 
 PPQ = 96
+MAX_VOICES = 16
+CHANNELS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15)     # channel 10 (index 9) is the drums: voices skip it
 GRID = 12
 LETTERS = (("c", 0), ("c", 1), ("d", 0), ("d", 1), ("e", 0), ("f", 0), ("f", 1), ("g", 0), ("g", 1), ("a", 0), ("a", 1), ("b", 0))
 
@@ -62,8 +65,9 @@ def to_midi(tune):
         ev = [(0, 0, b"\xff\x03" + bytes([len(name)]) + name)]
         for n in voice:
             vel = max(1, min(127, round(n.vol * 127 / 15))) if n.vol else 1
-            ev.append((int(n.start), 2, bytes([0x90 | vi, n.pitch, vel])))
-            ev.append((int(n.start + n.dur), 1, bytes([0x80 | vi, n.pitch, 0])))
+            ch = CHANNELS[vi % len(CHANNELS)]
+            ev.append((int(n.start), 2, bytes([0x90 | ch, n.pitch, vel])))
+            ev.append((int(n.start + n.dur), 1, bytes([0x80 | ch, n.pitch, 0])))
         tracks.append(_track(ev))
     head = struct.pack(">HHH", 1, len(tracks), PPQ)
     return _chunk(b"MThd", head) + b"".join(tracks)
@@ -141,12 +145,48 @@ def _parse_track(body):
     return ev
 
 
-def from_midi(data):
-    """MIDI bytes -> Song (raises MidiError if it cannot be read)."""
+def rank_parts(parts):
+    """Part indexes, most important first: the part that sounds longest (a lead or a bass line that plays all the way
+    through), then the higher one (the melody sits on top)."""
+    def key(i):
+        ns = parts[i]
+        sounding = sum(e - s for s, e, p in ns)
+        return (-sounding, -sum(p for s, e, p in ns) / len(ns), i)
+    return sorted(range(len(parts)), key=key)
+
+
+def _fold(kept, dropped, q):
+    """Pour the notes of the `dropped` parts into the gaps of the `kept` ones (each a list of (start, end, pitch)).
+    Returns (notes placed, notes left out)."""
+    busy = [sorted((q(s), max(q(e), q(s) + GRID)) for s, e, p in ns) for ns in kept]
+
+    def free(spans, a, b):
+        return all(b <= s or a >= e for s, e in spans)
+    placed = lost = 0
+    for part in dropped:
+        for s, e, p in sorted(part):
+            a, b = q(s), max(q(e), q(s) + GRID)
+            for k, spans in enumerate(busy):
+                if free(spans, a, b):
+                    spans.append((a, b))
+                    kept[k].append((s, e, p))
+                    placed += 1
+                    break
+            else:
+                lost += 1
+    for ns in kept:
+        ns.sort()
+    return placed, lost
+
+
+def from_midi(data, voices=None):
+    """MIDI bytes -> Song (raises MidiError if it cannot be read).  Every track / channel with notes becomes a voice, up
+    to 16.  `voices=N` makes a song of exactly N voices (or fewer, if the file has fewer parts): the N most important
+    parts stay, and the notes of the others are placed in whatever gaps those leave."""
     div, tracks = parse(data)
     scale = PPQ / div
     q = lambda t: int(round(t * scale / GRID)) * GRID
-    voices, drums = [], 0
+    found, drums = [], 0
     bpm, time, tempos = None, None, []
     for ev in tracks:
         open_, notes = {}, {}
@@ -166,21 +206,34 @@ def from_midi(data):
             elif kind in ("on", "off") and ch == 9:
                 drums += 1
         for ch, ns in sorted(notes.items()):
-            voices.append(sorted(ns))
-    voices = [v for v in voices if v]
+            found.append(sorted(ns))
+    parts = [v for v in found if v]
+    if not parts:
+        raise MidiError("the file has no notes")
+    want = min(len(parts), MAX_VOICES if voices is None else max(1, min(MAX_VOICES, int(voices))))
+    order = rank_parts(parts)
+    kept_ix = sorted(order[:want])                                   # the file's own order among the kept parts
+    kept = [list(parts[i]) for i in kept_ix]
+    dropped = [parts[i] for i in order[want:]]
     song = Song()
     song.bpm = max(30, min(300, bpm or 120))
     if time and 1 <= time[0] <= 32 and time[1] in (1, 2, 4, 8, 16, 32):
         song.time = time
-    if len(voices) > 4:
-        song.warnings.append("the file has %d parts with notes: only the first four were used" % len(voices))
+    if dropped:
+        placed, lost = _fold(kept, dropped, q)
+        total = sum(len(p) for p in dropped)
+        song.warnings.append("the file has %d parts with notes: the %d most important became voices and the other %d were folded in "
+                             "(%d of their %d notes fit into gaps, %d were left out)"
+                             % (len(parts), want, len(dropped), placed, total, lost))
     if drums:
         song.warnings.append("the drum part was left out")
-    for k, ns in enumerate(voices[:4]):
+    song.voices = len(kept)
+    song.tracks = {}
+    song.__post_init__()
+    for k, ns in enumerate(kept):
         song.tracks["V%d" % (k + 1)] = _voice_events(ns, q, tempos if k == 0 else [])
-    if not voices:
-        raise MidiError("the file has no notes")
     return song
+
 
 
 def _voice_events(notes, q, tempos):

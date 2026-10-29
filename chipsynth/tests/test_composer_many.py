@@ -257,3 +257,20 @@ class ExtrasTests(unittest.TestCase):
         a.cursor_tick = 9999
         a.cut_here()                                    # past the end: says so and changes nothing
         self.assertEqual(a.tune.length, 480)
+
+
+class OpenMidiTests(unittest.TestCase):
+    def test_opening_a_midi_file_keeps_all_its_parts_and_says_so(self):
+        from chipsynth import midi
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        song = Song.from_mml("voices 6\n" + "\n".join("V%d: c" % i for i in range(1, 7)) + "\n")
+        (d / "six.mid").write_bytes(midi.to_midi(song.compile()))
+        a = Composer(screen, Prefs(view="roll"), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        self.assertTrue(a.open_path(d / "six.mid"))
+        a.frame()
+        self.assertEqual(a.roll.nv, 6)
+        self.assertIn("6 voices", a.message)
+        self.assertNotIn("four", a.message)

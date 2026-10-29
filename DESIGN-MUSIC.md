@@ -173,7 +173,10 @@ Author: Mike.  Status: design talk in progress.  Built so far: see 'Built' at th
   stored exactly as before) and the song editor all follow the tune's counts. A voice line past the count is an error naming the header line to add.
 - Composer (slice 2): the Tracks view, piano roll (one drum strip per DAC), tracker (columns scroll sideways when they do not fit) and the Voices
   panel (scrolls) follow the song's counts; the number keys 1-9 pick lanes; colours repeat after the palette's six.
-- Not yet: importers still keep four voices (slice 3).
+- MIDI import (slice 3): every track/channel with notes becomes a voice, up to 16; `from_midi(data, voices=N)` / `import --voices N` keeps the N
+  most important parts (ranked by how long they sound, then by pitch) and pours the other parts' notes into the gaps of the kept ones, with a
+  report of how many fitted. MIDI export skips channel 10 (the drums) so a big song stays melodic. The FamiStudio and SID importers (PLAN-FORMATS.md)
+  will use the same rule.
 - **Length limit:** an **event-count cap** (about 200,000 events per tune), not a time cap; a tune over the cap is refused with a
   clear message, and the music tool shows the count. Playback is streamed (the mixer renders a few seconds ahead in chunks), so a
   tune can in principle run indefinitely; a loop repeats until the music changes.

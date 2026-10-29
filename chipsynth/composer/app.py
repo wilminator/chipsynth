@@ -213,7 +213,8 @@ class Composer:
                 return bool(ids) and self.open_song_id(ids[0])
             if p.suffix.lower() in (".mid", ".midi"):
                 song = midi.from_midi(p.read_bytes())
-                self.say("Imported %s: the first four parts with notes. Save to keep it." % p.name, 6.0)
+                self.say("Imported %s: %d voice%s%s. Save to keep it." % (p.name, song.voices, "" if song.voices == 1 else "s",
+                         "; " + song.warnings[0] if song.warnings else ""), 8.0)
                 return self.load_song(song, p.stem, "")
             text = p.read_text(encoding="utf-8", errors="replace")
             song = Song.from_mml(text, self.lib)

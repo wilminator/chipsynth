@@ -157,6 +157,9 @@ def import_cmd(args):
     p.add_argument("--shared", action="store_true",
                    help="the files are libraries: add their instruments, fx, scales and samples to the package")
     p.add_argument("--no-replace", action="store_true", help="refuse a song id that the package already has")
+    p.add_argument("--voices", type=int, metavar="N",
+                   help="(MIDI) make songs of N voices: the most important parts stay and the others' notes fill their gaps "
+                        "(default: a voice for every part, up to 16)")
     add_library_options(p)
     a = p.parse_args(args)
     if a.id and len(a.files) != 1:
@@ -177,7 +180,7 @@ def import_cmd(args):
             raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
         verb = "replaced" if sid in pkg.songs else "added"
         if is_midi:
-            pkg.add_song(sid, midi.from_midi(Path(f).read_bytes()), lib)
+            pkg.add_song(sid, midi.from_midi(Path(f).read_bytes(), voices=a.voices), lib)
         else:
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, song_id=sid)
         print("%s song '%s' from %s" % (verb, sid, f))

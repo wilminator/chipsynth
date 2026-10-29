@@ -51,16 +51,58 @@ class MidiTests(unittest.TestCase):
         got = notes(song.compile(), 0)
         self.assertEqual(got, [(0, 48, 60), (48, 96, 64)])
 
-    def test_drums_and_extra_parts_are_reported_not_fatal(self):
+    @staticmethod
+    def file(channels, lens=None, start=None, drums=True):
+        """A format-1 file with one track per channel: channel ch plays note 60+ch for lens[ch] quarters from start[ch]."""
         def trk(ev):
             body = b"".join(midi._varlen(d) + b for d, b in ev) + b"\x00\xff\x2f\x00"
             return midi._chunk(b"MTrk", body)
-        parts = [trk([(0, bytes([0x90 | ch, 60 + ch, 90]) ), (96, bytes([0x80 | ch, 60 + ch, 0]))]) for ch in (0, 1, 2, 3, 4, 9)]
-        data = midi._chunk(b"MThd", struct.pack(">HHH", 1, 6, 96)) + b"".join(parts)
-        song = midi.from_midi(data)
-        self.assertEqual(sorted(k for k, v in song.tracks.items() if v), ["V1", "V2", "V3", "V4"])
-        self.assertTrue(any("first four" in w for w in song.warnings))
+        tracks = []
+        for ch in channels:
+            a = (start or {}).get(ch, 0)
+            n = (lens or {}).get(ch, 1)
+            tracks.append(trk([(96 * a, bytes([0x90 | ch, 60 + ch, 90])), (96 * n, bytes([0x80 | ch, 60 + ch, 0]))]))
+        return midi._chunk(b"MThd", struct.pack(">HHH", 1, len(tracks), 96)) + b"".join(tracks)
+
+    def test_every_part_becomes_a_voice(self):
+        song = midi.from_midi(self.file((0, 1, 2, 3, 4, 9)))
+        self.assertEqual(song.voices, 5)
+        self.assertEqual(sorted(k for k, v in song.tracks.items() if v), ["V1", "V2", "V3", "V4", "V5"])
+        self.assertFalse(any("most important" in w for w in song.warnings))
         self.assertTrue(any("drum" in w for w in song.warnings))
+        self.assertEqual(len(song.compile().voices), 5)
+
+    def test_asking_for_four_voices_keeps_the_most_important_and_folds_the_rest_into_gaps(self):
+        # parts 0-3 play a quarter note at bar 1; part 4 plays at beat 3 (a gap in every kept voice); part 5 collides
+        data = self.file((0, 1, 2, 3, 4, 5), lens={0: 8, 1: 7, 2: 6, 3: 5, 4: 1, 5: 1}, start={4: 9, 5: 0})
+        song = midi.from_midi(data, voices=4)
+        self.assertEqual(song.voices, 4)
+        w = [w for w in song.warnings if "most important" in w]
+        self.assertEqual(len(w), 1)
+        self.assertIn("1 of their 2 notes fit", w[0])
+        tune = song.compile()
+        self.assertEqual(sum(len(v) for v in tune.voices), 5)           # 4 kept parts + the one that fitted
+        self.assertEqual({n.pitch for v in tune.voices for n in v}, {60, 61, 62, 63, 64})
+
+    def test_the_longest_sounding_part_outranks_a_short_one(self):
+        parts = [[(0, 96, 80)], [(0, 960, 40)], [(0, 480, 60)]]
+        self.assertEqual(midi.rank_parts(parts), [1, 2, 0])
+
+    def test_more_than_sixteen_parts_keep_sixteen(self):
+        song = midi.from_midi(self.file(list(range(9)) + [10, 11, 12, 13, 14, 15] + [0, 1, 2]))
+        self.assertEqual(song.voices, 16)
+        self.assertTrue(any("most important" in w for w in song.warnings))
+
+    def test_a_requested_count_larger_than_the_parts_is_just_the_parts(self):
+        self.assertEqual(midi.from_midi(self.file((0, 1)), voices=8).voices, 2)
+        self.assertEqual(midi.from_midi(self.file((0, 1, 2)), voices=0).voices, 1)
+
+    def test_the_song_round_trips_through_mml_and_the_package(self):
+        from chipsynth import package as pk
+        song = midi.from_midi(self.file((0, 1, 2, 3, 4, 5)))
+        again = Song.from_mml(song.to_mml())
+        self.assertEqual(again.voices, 6)
+        self.assertEqual(pk.decode_song(pk.encode_song(song)).voices, 6)
 
     def test_running_status_and_note_on_with_zero_velocity(self):
         body = (midi._varlen(0) + bytes([0x90, 60, 90]) + midi._varlen(96) + bytes([60, 0])
@@ -99,3 +141,14 @@ class MidiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ManyVoiceFileTests(unittest.TestCase):
+    def test_writing_a_big_song_never_uses_the_drum_channel(self):
+        text = "voices 12\n" + "\n".join("V%d: c" % i for i in range(1, 13)) + "\n"
+        data = midi.to_midi(Song.from_mml(text).compile())
+        _, tracks = midi.parse(data)
+        chans = {ev[4] for t in tracks for ev in t if ev[1] == "on"}
+        self.assertEqual(len(chans), 12)
+        self.assertNotIn(9, chans)
+        self.assertEqual(midi.from_midi(data).voices, 12)
