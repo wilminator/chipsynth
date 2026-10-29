@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from . import mml
 from .mml import MMLError, TICKS_WHOLE, LETTER, DURATIONS, VOICE_LABEL, SECTION, WORDS, NOTE_NAMES
-from .song import (Song, Clip, SongError, Rel, explicit_ticks, TRACKS, Note, Degree, Rest, Length, Octave, Volume,
+from .song import (Song, Clip, SongError, Rel, explicit_ticks, Note, Degree, Rest, Length, Octave, Volume,
                    Tempo, Tie, Extend, Select, Fx, Tweak, Key, Bar, Loop, Once, Repeat, Call, Comment, Play, Stop,
                    Level)
 from .synth import Instrument
@@ -280,7 +280,7 @@ def from_mml(text, lib=None):
                 detune=hdr.detune, once=hdr.once, echo=hdr.echo, reverb=hdr.reverb,
                 instruments={k: replace(v) for k, v in hdr.instruments.items()},
                 fx={k: list(v) for k, v in hdr._fxsets.items()}, keys=dict(hdr._keys),
-                samples=dict(hdr._sampledefs), warnings=list(hdr.warnings))
+                samples=dict(hdr._sampledefs), warnings=list(hdr.warnings), voices=hdr.nvoices, dacs=hdr.ndacs)
     patterns = dict(hdr._patterns)
     tok = _Tok(song, patterns, lib)
 
@@ -304,7 +304,7 @@ def from_mml(text, lib=None):
             pending = []
             continue
         label = vm.group(1).upper()
-        name = label if label[0] == "D" else "V" + label[1]
+        name = label if label[0] == "D" else "V" + label[1:]
         dac = label[0] == "D"
         items = song.tracks[name]
         items.extend(Comment(t) for t in pending)
@@ -527,6 +527,10 @@ def to_mml(song):
         out.append("reverb %d" % song.reverb)
     if song.once:
         out.append("once")
+    if song.voices != 4:
+        out.append("voices %d" % song.voices)
+    if song.dacs != 2:
+        out.append("dacs %d" % song.dacs)
 
     def section(name, lines):
         if lines:
@@ -538,7 +542,7 @@ def to_mml(song):
     section("pat", ["%s = %s" % (c.name, c.raw if c.raw is not None else " ".join(_join(_event_stream(c.items, True))))
                     for c in song.clips.values()])
 
-    for name in TRACKS:
+    for name in song.names:
         items = song.tracks.get(name) or []
         if not items:
             continue

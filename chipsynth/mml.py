@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from .synth import Instrument, RATE, WAVES
+from .synth import Instrument, RATE, WAVES, MAX_VOICES, MAX_DACS
 
 TICKS_WHOLE = 384                 # a quarter note is 96 ticks
 EVENT_CAP = 200000                # note on + note off events per tune
@@ -43,7 +43,7 @@ BUILTIN_INSTR = {
     "hat": Instrument(wave="noise", nmode="short", a=0, d=1, s=0, r=1, vol=9, send=0),
     "crash": Instrument(wave="noise", a=0, d=8, s=0, r=7, vol=11, send=0),
 }
-VOICE_LABEL = re.compile(r"^\s*([vVpP][1-4]|[dD][12])\s*:(.*)$")
+VOICE_LABEL = re.compile(r"^\s*([vVpP][1-9][0-9]?|[dD][1-9][0-9]?)\s*:(.*)$")
 SECTION = re.compile(r"^\s*\[([A-Za-z]+)\]\s*$")
 WORDS = re.compile(r"(loop|once|wave|pw|adsr|pan|nmode|instr|vib|slide|arprate|arp|pws|fx|filter|fsweep|send)(?![A-Za-z])", re.I)
 SECTIONS = ("instr", "pat", "fx", "sample", "key")
@@ -91,6 +91,8 @@ class Tune:
     detune: int = 0                                      # cents
     echo: tuple = None                                   # (seconds, feedback 0-1, mix 0-1, wide) or None
     reverb: int = 0                                      # 0 = off, 1-15
+    nvoices: int = 4                                     # header `voices N` (1-16): how many V lines
+    ndacs: int = 2                                       # header `dacs N` (0-8): how many D lines
     voices: list = field(default_factory=lambda: [[], [], [], []])
     length: int = 0                                      # ticks
     loop_tick: int = 0
@@ -212,10 +214,8 @@ class _Parser:
         self.patterns = {}
         self.fxsets = {}
         self.keys = {}
-        self.voices = [_Voice(i) for i in range(4)]
-        self.dvoices = [_Voice(4), _Voice(5)]
-        for k, dv in enumerate(self.dvoices):
-            dv.dac = k
+        self.voices = []              # made once the header has said how many (voices N / dacs N)
+        self.dvoices = []
         self.sampledefs = {}          # [sample] name -> (file name, rate override or None)
         self._samples = {}
         self.tempo = {}
@@ -358,6 +358,7 @@ class _Parser:
                 section = None
                 continue
             self.header_line(n, line, section)
+        self.make_voices()
         self.tune._patterns = dict(self.patterns)
         self.tune._fxsets = dict(self.fxsets)
         self.tune._keys = dict(self.keys)
@@ -367,6 +368,15 @@ class _Parser:
         for n, line, vm in voice_lines:
             self.voice_line(n, line, vm)
         return self.finish()
+
+    def make_voices(self):
+        nv, nd = self.tune.nvoices, self.tune.ndacs
+        self.voices = [_Voice(i) for i in range(nv)]
+        self.dvoices = [_Voice(nv + k) for k in range(nd)]
+        for k, dv in enumerate(self.dvoices):
+            dv.dac = k
+        self.tune.voices = [[] for _ in range(nv)]
+        self.tune.dac = [[] for _ in range(nd)]
 
     # ---- header
     def header_line(self, n, line, section):
@@ -401,6 +411,10 @@ class _Parser:
             t.detune = self.number(rest.lstrip("+") if rest.lstrip("+").lstrip("-").isdigit() else rest, -1200, 1200, "tune", n, col)
         elif w == "once":
             t.once = True
+        elif w == "voices":
+            t.nvoices = self.number(rest, 1, MAX_VOICES, "voices", n, col)
+        elif w == "dacs":
+            t.ndacs = self.number(rest, 0, MAX_DACS, "dacs", n, col)
         elif w == "echo":
             t.echo = self.parse_echo(rest, n, col)
         elif w == "reverb":
@@ -609,10 +623,13 @@ class _Parser:
     # ---- voices
     def voice_line(self, n, line, vm):
         label = vm.group(1).upper()
-        if label[0] == "D":
-            v = self.dvoices[int(label[1]) - 1]
-        else:
-            v = self.voices[int(label[1]) - 1]
+        k = int(label[1:]) - 1
+        pool = self.dvoices if label[0] == "D" else self.voices
+        if k >= len(pool):
+            self.err("%s: this tune has %d %s (header line '%s %d' changes that)" % (
+                label, len(pool), "DACs" if label[0] == "D" else "voices",
+                "dacs" if label[0] == "D" else "voices", k + 1), n, vm.start(1) + 1)
+        v = pool[k]
         body = vm.group(2)
         self.run_text(v, body, n, vm.start(2) + 1, 0)
 

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 
 from . import dpcm, mml, song as sg
-from .song import Song, Clip, TRACKS
+from .song import Song, Clip
 from .synth import Instrument
 
 MAGIC = b"CSPK"
@@ -300,7 +300,11 @@ def _get_keys(r):
 # ------------------------------------------------------------------ songs
 def encode_song(song):
     w = _W()
-    w.u(0)                                             # song format, minor revision
+    custom = (song.voices, song.dacs) != (4, 2)
+    w.u(1 if custom else 0)                            # song format, minor revision (1: the voice and DAC counts follow)
+    if custom:
+        w.u(song.voices)
+        w.u(song.dacs)
     for text in (song.title, song.author, song.comment):
         w.t(text)
     w.u(song.bpm)
@@ -337,15 +341,18 @@ def encode_song(song):
         if c.raw is not None:
             w.t(c.raw)
         _put_events(w, c.items)
-    for name in TRACKS:
+    for name in song.names:
         _put_events(w, song.tracks.get(name, []))
     return w.done()
 
 
 def decode_song(data):
     r = _R(data)
-    r.u()
-    s = Song(title=r.t(), author=r.t(), comment=r.t())
+    minor = r.u()
+    voices, dacs = (r.u(), r.u()) if minor >= 1 else (4, 2)
+    if not 1 <= voices <= 16 or not 0 <= dacs <= 8:
+        raise PackageError("a song with %d voices and %d DACs is not valid" % (voices, dacs))
+    s = Song(title=r.t(), author=r.t(), comment=r.t(), voices=voices, dacs=dacs)
     s.bpm = r.u()
     s.time = (r.u(), r.u())
     s.detune = r.s()
@@ -365,7 +372,7 @@ def decode_song(data):
         name, dac = r.t(), r.flag()
         raw = r.t() if r.flag() else None
         s.clips[name] = Clip(name, _get_events(r), dac, raw)
-    for name in TRACKS:
+    for name in s.names:
         s.tracks[name] = _get_events(r)
     return s
 

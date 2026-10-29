@@ -20,7 +20,7 @@ import re
 
 from . import mml
 from .mml import MMLError, LETTER
-from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Tempo, Loop, Trace, Clip, TRACKS,
+from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Tempo, Loop, Trace, Clip,
                    SongError, Volume, Tweak, Key)
 from .synth import WAVES, Instrument
 from .songmml import length_pieces
@@ -169,7 +169,7 @@ class Editor:
 
     # ---- the derived view
     def refresh(self):
-        self.trace = Trace()
+        self.trace = Trace(self.song.voices + self.song.dacs)
         self.tune = self.song.compile(self.lib, self.trace)
         return self.tune
 
@@ -519,12 +519,12 @@ class Editor:
                 k.tonic, k.scale = tonic % 12, scale
             self.refresh()
             if keep_pitch:
-                for v in range(4):
+                for v in range(self.song.voices):
                     for start, pitch in before[v]:
                         i = self.find(v, start)
                         if i is not None and self.tune.voices[v][i].pitch != pitch:
                             self._set_pitch(v, i, pitch)
-                for v in range(4):
+                for v in range(self.song.voices):
                     if [(n.start, n.pitch) for n in self.tune.voices[v]] != before[v]:
                         raise EditError("some notes cannot be kept at their pitch in that key")
             return len(keys)
@@ -556,7 +556,7 @@ class Editor:
 
     def voice_instrument(self, voice):
         """The name the voice selects before its first sound, or None (it plays the default instrument)."""
-        e = self._first_select(self.song.tracks.get(TRACKS[voice], ()))
+        e = self._first_select(self.song.tracks.get(self.song.names[voice], ()))
         return e.name if e else None
 
     def edit_instrument(self, name, **fields):
@@ -593,7 +593,7 @@ class Editor:
         def run():
             if self.instrument(name) is None:
                 raise EditError("no instrument '%s'" % name)
-            e = self._first_select(self.song.tracks.get(TRACKS[voice], ()))
+            e = self._first_select(self.song.tracks.get(self.song.names[voice], ()))
             if e is not None:
                 e.name = name
             else:
@@ -620,7 +620,7 @@ class Editor:
         if name in self.song.instruments or name in self.lib["instr"]:
             raise EditError("there is already an instrument called '%s'" % name)
         self.song.instruments[name] = dataclasses.replace(base)
-        e = self._first_select(self.song.tracks.get(TRACKS[voice], ()))
+        e = self._first_select(self.song.tracks.get(self.song.names[voice], ()))
         if e is not None:
             e.name = name
         else:
@@ -666,7 +666,7 @@ class Editor:
     def tempo_marks(self):
         """[(tick, bpm)] of the tempo changes in the song (the starting tempo is song.bpm)."""
         seen = {}
-        for lane in range(6):
+        for lane in range(len(self.trace.pieces)):
             for p in self.trace.pieces[lane]:
                 if p.kind == "tempo":
                     seen.setdefault(p.start, p.event.bpm)
@@ -674,7 +674,7 @@ class Editor:
 
     def loop_at(self):
         """The tick of the loop marker the compiler used, or None."""
-        for lane in range(6):
+        for lane in range(len(self.trace.pieces)):
             for p in self.trace.pieces[lane]:
                 if p.kind == "loop":
                     return p.start
@@ -687,7 +687,7 @@ class Editor:
             if tick <= 0:
                 self.song.bpm = bpm
                 return
-            for lane in range(6):
+            for lane in range(len(self.trace.pieces)):
                 for p in self.trace.pieces[lane]:
                     if p.kind == "tempo" and p.start == tick:
                         p.event.bpm = bpm
@@ -698,7 +698,7 @@ class Editor:
     def remove_tempo(self, tick):
         def run():
             hit = False
-            for lane in range(6):
+            for lane in range(len(self.trace.pieces)):
                 for p in list(self.trace.pieces[lane]):
                     if p.kind == "tempo" and p.start == tick and p.event in p.container:
                         p.container.remove(p.event)
@@ -949,7 +949,7 @@ class Editor:
 
     # ---- the pieces of an edit
     def _track(self, voice):
-        return self.song.tracks.setdefault(TRACKS[voice], [])
+        return self.song.tracks.setdefault(self.song.names[voice], [])
 
     def _check(self, *ticks):
         for t in ticks:
@@ -1009,7 +1009,7 @@ class Editor:
                     break
                 run.append(q)
             last = run[-1]
-            at_end = (last.start + last.dur == self.trace.ends[voice] and c is self.song.tracks.get(TRACKS[voice])
+            at_end = (last.start + last.dur == self.trace.ends[voice] and c is self.song.tracks.get(self.song.names[voice])
                       and c and c[-1] is last.event)
             if last.start + last.dur >= end or at_end:      # a rest that ends the voice can be written over past its end
                 return run
@@ -1069,7 +1069,7 @@ class Editor:
             else:
                 return rests, False
             i += 1
-        return rests, c is self.song.tracks.get(TRACKS[voice])
+        return rests, c is self.song.tracks.get(self.song.names[voice])
 
     def max_dur(self, voice, index):
         g = self.group(voice, index)
