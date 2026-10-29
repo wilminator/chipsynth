@@ -21,7 +21,7 @@ import re
 from . import mml
 from .mml import MMLError, LETTER
 from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Tempo, Loop, Trace, Clip,
-                   SongError, Volume, Tweak, Key)
+                   SongError, Volume, Tweak, Key, Fx, Bar, Comment, Length)
 from .synth import WAVES, Instrument
 from .songmml import length_pieces
 
@@ -715,6 +715,44 @@ class Editor:
                 self.refresh()
                 self._insert_at(0, tick, Loop())
         return self.change("loop point", run)
+
+    _STATE = (Octave, Volume, Select, Fx, Tweak, Key, Comment, Length)         # events with no length: they may sit among the end rests
+
+    def _trailing(self, items):
+        """Indexes of the rests and bar marks that end a track (nothing sounding comes after them)."""
+        out = []
+        for i in range(len(items) - 1, -1, -1):
+            e = items[i]
+            if isinstance(e, (Rest, Bar)):
+                out.append(i)
+            elif not isinstance(e, self._STATE):
+                break
+        return out
+
+    def trailing_rest_ticks(self):
+        """How many ticks of rests at the ends of the tracks make the song longer than its last sound (0: none)."""
+        return max(0, self.tune.length - self.sound_end())
+
+    def sound_end(self):
+        """The tick where the last note or drum hit ends."""
+        ends = [n.start + n.dur for v in self.tune.voices for n in v]
+        for events in self.tune.dac:
+            ends += [e[0] for e in events]
+        return max(ends, default=0)
+
+    def trim_end(self):
+        """Remove the rests (and bar marks) that end the tracks, so the song ends where its last note does.  An erased
+        note leaves a rest behind to keep the timing, which is why erasing the end of a song does not shorten it."""
+        def run():
+            n = 0
+            for items in self.song.tracks.values():
+                for i in self._trailing(items):
+                    del items[i]
+                    n += 1
+            if not n:
+                raise EditError("no rests at the end to remove")
+            return n
+        return self.change("trim end", run)
 
     def _remove_events(self, cls):
         def strip(items):

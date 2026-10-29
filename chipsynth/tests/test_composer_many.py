@@ -178,3 +178,23 @@ class LayoutGuardTests(unittest.TestCase):
         panels.draw(a)
         a.set_mode("stack")
         self.assertIn("heads", a.geo)
+
+
+class TrimEndWindowTests(unittest.TestCase):
+    def test_trim_end_button_action_shortens_the_song(self):
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        a = Composer(screen, Prefs(view="roll"), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        a.load_song(Song.from_mml("V1: l4 c d e f | g a b >c |\n"), "Two bars", source=str(d / "t.mml"))
+        a.frame()
+        for n in range(7, 3, -1):
+            a.ed.erase(0, n)
+        a.sync()
+        self.assertEqual(a.tune.length, 768)
+        a.trim_end()
+        a.frame()
+        self.assertEqual(a.tune.length, 384)
+        a.trim_end()                                     # nothing left to trim: says so, changes nothing
+        self.assertEqual(a.tune.length, 384)

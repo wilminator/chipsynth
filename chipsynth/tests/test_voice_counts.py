@@ -10,7 +10,7 @@ from chipsynth import mml, package as pk
 from chipsynth.mml import MMLError
 from chipsynth.player import TunePlayer
 from chipsynth.song import Song, Trace, track_names
-from chipsynth.songedit import Editor
+from chipsynth.songedit import Editor, EditError
 from chipsynth.synth import Synth
 
 DATA = Path(__file__).resolve().parent / "data" / "many_voices"
@@ -157,3 +157,46 @@ class PlayTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrimEndTests(unittest.TestCase):
+    """Erasing the end of a song leaves rests that keep it long; trim_end removes them."""
+    TEXT = "V1: l4 c d e f | g a b >c |\nV2: l4 c r r r | r r r r |\n"
+
+    def test_erasing_the_last_notes_leaves_the_song_as_long_as_before(self):
+        ed = Editor(Song.from_mml(self.TEXT), None)
+        self.assertEqual(ed.tune.length, 768)
+        for n in range(7, 3, -1):
+            ed.erase(0, n)
+        self.assertEqual(ed.tune.length, 768)                      # the rests are still there
+        self.assertEqual(ed.trailing_rest_ticks(), 384)
+
+    def test_trim_end_cuts_the_song_to_its_last_sound(self):
+        ed = Editor(Song.from_mml(self.TEXT), None)
+        for n in range(7, 3, -1):
+            ed.erase(0, n)
+        ed.trim_end()
+        self.assertEqual(ed.tune.length, 384)
+        self.assertEqual(ed.trailing_rest_ticks(), 0)
+        self.assertEqual([len(v) for v in ed.tune.voices[:2]], [4, 1])
+        ed.undo()
+        self.assertEqual(ed.tune.length, 768)
+
+    def test_nothing_to_trim_is_an_error_that_changes_nothing(self):
+        ed = Editor(Song.from_mml("V1: c d e f\n"), None)
+        with self.assertRaises(EditError):
+            ed.trim_end()
+        self.assertEqual(ed.tune.length, 192)
+
+    def test_rests_in_the_middle_stay(self):
+        ed = Editor(Song.from_mml("V1: l4 c r r d\nV2: l4 c r r r r r r r\n"), None)
+        ed.trim_end()
+        self.assertEqual(ed.tune.length, 384)
+        self.assertEqual([n.start for n in ed.tune.voices[0]], [0, 288])
+
+    def test_a_drum_track_that_ends_in_a_rest_is_trimmed_too(self):
+        ed = Editor(Song.from_mml("V1: l4 c d e f\nD1: kick4 r1\n[sample]\nkick = kit_kick\n", lib()), lib())
+        self.assertEqual(ed.tune.length, 480)
+        self.assertEqual(ed.trailing_rest_ticks(), 96)
+        ed.trim_end()
+        self.assertEqual(ed.tune.length, 384)

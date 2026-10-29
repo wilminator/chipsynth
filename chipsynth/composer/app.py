@@ -1207,6 +1207,12 @@ class Composer:
             self.say("Loops from bar %d." % (self.ed.tune.loop_tick // max(1, self.tune.bar_ticks) + 1)
                      if self.ed.tune.loop_tick else "No loop point: plays from the start.", 3.0)
 
+    def trim_end(self):
+        before = self.tune.length
+        if self.edit(lambda: self.ed.trim_end()):
+            self.say("Trimmed the song from %d to %d bars." % (-(-before // self.tune.bar_ticks),
+                                                                -(-self.ed.tune.length // self.tune.bar_ticks)), 4.0)
+
     def add_tempo_here(self):
         tick = self.cursor_tick
         self.edit(lambda: self.ed.set_tempo_at(tick, round(self.tune.bpm_at(tick))))

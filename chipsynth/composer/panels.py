@@ -783,6 +783,8 @@ def inspector(app):
     btn_row(("Loop from bar %d" % cur_bar, "Loop from the bar where Play starts (click the ruler to move it)", app.cursor_tick > 0,
              lambda: app.set_loop(app.cursor_tick)),
             ("No loop point", "Play from the start again each time", bool(t.loop_tick), lambda: app.set_loop(None)))
+    btn_row(("Trim end rests", "Cut the song down to where its last note ends: erased notes leave rests that keep it long",
+             ed.trailing_rest_ticks() > 0, app.trim_end))
     marks = ed.tempo_marks()
     text(surf, f.small, "Tempo changes", (x + pad, y + 2), th["dim"])
     y += int(f.line * 1.15)
