@@ -331,8 +331,11 @@ def tracker_geo(app):
     cols = max(1, min(lanes, (w - rn - sb) // int(line * 4.6)))       # columns that fit; the rest scroll sideways
     cw = max(10, (w - rn - sb) // cols)
     rows_y = y + head
-    visible = max(1, (h - head) // row_h)
-    return dict(x=x, y=y, w=w, h=h, head=head, rn=rn, sb=sb, row_h=row_h, cw=cw, rows_y=rows_y, visible=visible, cols=cols)
+    hb = sb if cols < lanes else 0                                    # a bar along the bottom when columns scroll sideways
+    visible = max(1, (h - head - hb) // row_h)
+    hbar = (x + rn, y + h - hb, w - rn - sb, hb) if hb else None
+    return dict(x=x, y=y, w=w, h=h, head=head, rn=rn, sb=sb, row_h=row_h, cw=cw, rows_y=rows_y, visible=visible, cols=cols,
+                lanes=lanes, hbar=hbar)
 
 
 def tracker(app):
@@ -348,7 +351,10 @@ def tracker(app):
     # header
     pygame.draw.rect(surf, th["panel"], (g["x"], g["y"], g["w"], g["head"]))
     pygame.draw.line(surf, th["line"], (g["x"], g["y"] + g["head"] - 1), (g["x"] + g["w"], g["y"] + g["head"] - 1))
-    text(surf, f.small, "%s rows" % M.SNAPS[app.snap_i][0], (g["x"] + 6, g["y"] + g["head"] // 2), th["dim"], "ml")
+    text(surf, f.small, "%s rows" % M.SNAPS[app.snap_i][0], (g["x"] + 6, g["y"] + g["head"] * 3 // 10), th["dim"], "ml")
+    text(surf, f.small, "Octave %d" % cur.octave, (g["x"] + 6, g["y"] + g["head"] * 7 // 10), th["accent"], "ml")
+    if ui.hover((g["x"], g["y"], g["rn"], g["head"])):
+        ui.tip = "The octave the piano keys type in: - / + or Shift+Up / Shift+Down"
     left = cur.left
     shown = range(left, min(rl.lanes, left + g["cols"]))
     for c in shown:
@@ -408,6 +414,15 @@ def tracker(app):
         bh = max(20, int((g["h"] - g["head"]) * frac))
         by = g["rows_y"] + int((g["h"] - g["head"] - bh) * cur.top / max(1, n_rows - g["visible"]))
         pygame.draw.rect(surf, mix(th["dim"], th["panel"], 0.5), (bx + 2, by, g["sb"] - 4, bh), border_radius=3)
+    hb = g["hbar"]
+    if hb:
+        pygame.draw.rect(surf, th["panel"], hb)
+        span = max(1, g["lanes"])
+        tw = max(20, int(hb[2] * g["cols"] / span))
+        tx = hb[0] + int((hb[2] - tw) * cur.left / max(1, span - g["cols"]))
+        pygame.draw.rect(surf, mix(th["dim"], th["panel"], 0.5), (tx, hb[1] + 2, tw, hb[3] - 4), border_radius=3)
+        if ui.hover(hb):
+            ui.tip = "Tracks off screen: drag, or Shift+wheel, or the left / right arrows"
     if ui.hover((g["x"], g["rows_y"], g["w"], g["h"] - g["head"])):
         ui.tip = ("Type notes on the keys z s x d c v ... (piano layout), - / + octave, Delete erases, Enter places a drum sample, "
                   ", / . volume (Shift: bigger steps), ; effect")
@@ -784,7 +799,9 @@ def inspector(app):
              lambda: app.set_loop(app.cursor_tick)),
             ("No loop point", "Play from the start again each time", bool(t.loop_tick), lambda: app.set_loop(None)))
     btn_row(("Trim end rests", "Cut the song down to where its last note ends: erased notes leave rests that keep it long",
-             ed.trailing_rest_ticks() > 0, app.trim_end))
+             ed.trailing_rest_ticks() > 0, app.trim_end),
+            ("End at bar %d" % cur_bar, "End the song where Play starts (click the ruler to move it): everything after goes",
+             0 < app.cursor_tick < t.length, app.cut_here))
     marks = ed.tempo_marks()
     text(surf, f.small, "Tempo changes", (x + pad, y + 2), th["dim"])
     y += int(f.line * 1.15)
