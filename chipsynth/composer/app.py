@@ -85,7 +85,7 @@ class Composer:
         self.note_sel = None                 # (voice, index into roll.notes[voice])
         self.note_hover = None
         self.drag = None
-        self.overlay = None                  # None | "songs" | "help" | "prompt" | "new" | "unsaved"
+        self.overlay = None                  # None | "songs" | "help" | "prompt" | "new" | "unsaved" | "collapse"
         self.overlay_scroll = 0
         self.insp_scroll = 0
         self.message, self.message_until = "", 0.0
@@ -99,6 +99,7 @@ class Composer:
         self.snap_i = 1
         self.quit_warned = False
         self.pending = None
+        self.collapse = None
         self.sample_name = ""               # what a click in a drum lane places
         self.hit_sel = None                  # (lane, start tick) of the picked drum hit
         self.multi = set()                   # several picked notes: {(voice, start tick)}
@@ -199,6 +200,46 @@ class Composer:
         self.pending = (action, what)
         self.overlay = "unsaved"
         return False
+
+    # ---- collapse voices
+    def collapse_range(self):
+        """(from tick, to tick, text): the bars the selected notes span, else the whole song."""
+        bt = max(1, self.tune.bar_ticks)
+        notes = self.ed.selection_notes(sorted(self.selection())) if self.ed else []
+        if not notes:
+            return 0, max(bt, self.tune.length), "the whole song"
+        b0 = min(n[1] for n in notes) // bt
+        b1 = -(-max(n[1] + n[2] for n in notes) // bt)
+        return b0 * bt, b1 * bt, ("bar %d" % (b0 + 1) if b1 - b0 == 1 else "bars %d-%d" % (b0 + 1, b1))
+
+    def collapse_open(self):
+        if self.ed is None or self.tune.nvoices < 2:
+            self.say("There is only one voice.", 3.0)
+            return
+        t0, t1, label = self.collapse_range()
+        self.collapse = {"t0": t0, "t1": t1, "label": label, "target": min(4, self.tune.nvoices - 1), "plan": None}
+        self.collapse_plan()
+        self.overlay = "collapse"
+
+    def collapse_plan(self):
+        c = self.collapse
+        c["plan"] = self.ed.collapse_plan(c["t0"], c["t1"], c["target"])
+
+    def collapse_step(self, d):
+        c = self.collapse
+        c["target"] = max(1, min(self.tune.nvoices - 1, c["target"] + d))
+        self.collapse_plan()
+
+    def collapse_apply(self):
+        c = self.collapse
+        self.overlay = None
+        if self.edit(lambda: self.ed.collapse_voices(c["t0"], c["t1"], c["target"]), None):
+            plan = self.last_result
+            self.multi = set()
+            self.note_sel = None
+            self.say("Collapsed %s to %d voices: %d notes moved%s." % (
+                c["label"], c["target"], len(plan["moves"]),
+                ", %d left out" % len(plan["lost"]) if plan["lost"] else ""), 6.0)
 
     def finish_unsaved(self, choice):
         """choice: 'save', 'discard' or 'cancel'."""
@@ -638,6 +679,16 @@ class Composer:
         ctrl = mods & pygame.KMOD_CTRL
         if self.overlay == "new":
             self.new_dialog_key(e)
+            return
+        if self.overlay == "collapse":
+            if k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                self.collapse_apply()
+            elif k == pygame.K_ESCAPE:
+                self.overlay = None
+            elif k in (pygame.K_LEFT, pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_DOWN):
+                self.collapse_step(-1)
+            elif k in (pygame.K_RIGHT, pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_UP):
+                self.collapse_step(1)
             return
         if self.overlay == "unsaved":
             if k in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_s):

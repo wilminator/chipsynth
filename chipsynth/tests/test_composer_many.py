@@ -351,3 +351,72 @@ class SwitchGuardTests(unittest.TestCase):
         self.assertEqual(a.overlay, "unsaved")
         a.finish_unsaved("cancel")
         self.assertIsNone(a.overlay)
+
+
+class CollapseVoicesTests(unittest.TestCase):
+    TEXT = ("voices 6\nV1: l4 c d e f c d e f\nV2: l4 e f g a e f g a\nV3: l4 g a b > c < g a b > c <\n"
+            "V4: l4 c c c c c c c c\nV5: r1 l4 d d d d\nV6: r4 e r4 e r4 e r4 e r1\n")
+
+    def editor(self, text=None):
+        from chipsynth.songedit import Editor
+        return Editor(Song.from_mml(text or self.TEXT))
+
+    def count(self, ed, v, t0=0, t1=10 ** 6):
+        return sum(1 for n in ed.tune.voices[v] if t0 <= n.start < t1)
+
+    def test_plan_keeps_target_voices_and_does_not_change_the_song(self):
+        ed = self.editor()
+        before = ed.song.to_mml()
+        plan = ed.collapse_plan(0, ed.tune.length, 4)
+        self.assertEqual(len(plan["kept"]), 4)
+        self.assertEqual(ed.song.to_mml(), before)
+        self.assertEqual(len(plan["moves"]) + len(plan["lost"]), sum(self.count(ed, v) for v in range(6) if v not in plan["kept"]))
+
+    def test_collapse_empties_the_dropped_voices_and_is_one_undo(self):
+        ed = self.editor()
+        plan = ed.collapse_voices(0, ed.tune.length, 4)
+        for v in range(6):
+            if v not in plan["kept"]:
+                self.assertEqual(self.count(ed, v), 0)
+        self.assertTrue(ed.undo())
+        self.assertEqual(self.count(ed, 4), 4)
+
+    def test_only_the_chosen_bars_change(self):
+        ed = self.editor()
+        bt = ed.tune.bar_ticks
+        ed.collapse_voices(bt, 2 * bt, 4)
+        # voices that start outside bar 2 keep those notes
+        self.assertGreater(sum(self.count(ed, v, 2 * bt) + self.count(ed, v, 0, bt) for v in range(6)), 0)
+
+    def test_nothing_to_do_is_refused(self):
+        from chipsynth.songedit import EditError
+        ed = self.editor("voices 2\nV1: c d\nV2: e f\n")
+        with self.assertRaises(EditError):
+            ed.collapse_voices(0, ed.tune.length, 4)
+
+    def test_notes_with_no_gap_are_reported_as_lost(self):
+        ed = self.editor("voices 3\nV1: c1\nV2: e1\nV3: g1\n")
+        plan = ed.collapse_voices(0, ed.tune.length, 2)
+        self.assertEqual(len(plan["lost"]), 1)
+
+    def test_paste_can_reach_every_voice(self):
+        ed = self.editor()
+        ed.paste_notes([(0, 0, 24, 60)], 600, voice_shift=5)    # used to refuse anything above voice 4
+
+    def test_the_dialog_applies_in_the_composer(self):
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        a = Composer(screen, Prefs(view="roll"), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        a.load_song(Song.from_mml(self.TEXT), "t", "", "t")
+        a.frame()
+        a.collapse_open()
+        self.assertEqual(a.overlay, "collapse")
+        a.frame()
+        a.collapse_step(-1)
+        self.assertEqual(a.collapse["target"], 3)
+        a.collapse_apply()
+        self.assertIsNone(a.overlay)
+        self.assertLessEqual(sum(1 for v in range(6) if a.tune.voices[v]), 3)
+        self.assertTrue(a.song_dirty)
