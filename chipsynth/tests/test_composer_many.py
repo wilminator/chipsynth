@@ -274,3 +274,80 @@ class OpenMidiTests(unittest.TestCase):
         self.assertEqual(a.roll.nv, 6)
         self.assertIn("6 voices", a.message)
         self.assertNotIn("four", a.message)
+
+
+class SwitchGuardTests(unittest.TestCase):
+    """Switching songs must not lose edits: a dirty song is saved first (or explicitly set aside)."""
+
+    def make(self):
+        pygame.init()
+        screen = pygame.display.set_mode((1280, 760), pygame.RESIZABLE)
+        d = Path(tempfile.mkdtemp())
+        for name in ("a", "b"):
+            (d / (name + ".mml")).write_text("V1: c d e f\n")
+        a = Composer(screen, Prefs(view="roll"), prefs_path=d / "prefs.json", root=d)
+        a.frame()
+        self.assertTrue(a.open_path(d / "a.mml"))
+        a.frame()
+        return a, d
+
+    def edit(self, a):
+        a.edit(lambda: a.ed.set_tempo_at(0, 77))
+        self.assertTrue(a.song_dirty)
+
+    def test_clean_song_switches_at_once(self):
+        a, d = self.make()
+        self.assertTrue(a.open_path(d / "b.mml"))
+        self.assertEqual(Path(a.source).name, "b.mml")
+        self.assertIsNone(a.overlay)
+
+    def test_dirty_song_asks_and_does_not_switch(self):
+        a, d = self.make()
+        self.edit(a)
+        self.assertFalse(a.open_path(d / "b.mml"))
+        self.assertEqual(a.overlay, "unsaved")
+        self.assertEqual(Path(a.source).name, "a.mml")
+        a.frame()                                  # the dialog draws
+
+    def test_save_writes_the_edit_then_switches(self):
+        a, d = self.make()
+        self.edit(a)
+        a.open_path(d / "b.mml")
+        self.assertTrue(a.finish_unsaved("save"))
+        self.assertEqual(Path(a.source).name, "b.mml")
+        self.assertIn("77", (d / "a.mml").read_text())
+        self.assertIsNone(a.overlay)
+
+    def test_cancel_keeps_song_and_edits(self):
+        a, d = self.make()
+        self.edit(a)
+        a.open_path(d / "b.mml")
+        a.finish_unsaved("cancel")
+        self.assertEqual(Path(a.source).name, "a.mml")
+        self.assertTrue(a.song_dirty)
+        self.assertIsNone(a.overlay)
+
+    def test_failed_save_stays_put(self):
+        a, d = self.make()
+        self.edit(a)
+        a.open_path(d / "b.mml")
+        a.save = lambda path=None: False
+        self.assertFalse(a.finish_unsaved("save"))
+        self.assertEqual(a.overlay, "unsaved")
+        self.assertEqual(Path(a.source).name, "a.mml")
+
+    def test_discard_switches(self):
+        a, d = self.make()
+        self.edit(a)
+        a.open_path(d / "b.mml")
+        self.assertTrue(a.finish_unsaved("discard"))
+        self.assertEqual(Path(a.source).name, "b.mml")
+        self.assertNotIn("77", (d / "a.mml").read_text())
+
+    def test_new_song_dialog_is_guarded_too(self):
+        a, d = self.make()
+        self.edit(a)
+        a.new_from_generator_dialog()
+        self.assertEqual(a.overlay, "unsaved")
+        a.finish_unsaved("cancel")
+        self.assertIsNone(a.overlay)

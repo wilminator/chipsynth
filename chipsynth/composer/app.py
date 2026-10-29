@@ -85,7 +85,7 @@ class Composer:
         self.note_sel = None                 # (voice, index into roll.notes[voice])
         self.note_hover = None
         self.drag = None
-        self.overlay = None                  # None | "songs" | "help" | "prompt" | "new"
+        self.overlay = None                  # None | "songs" | "help" | "prompt" | "new" | "unsaved"
         self.overlay_scroll = 0
         self.insp_scroll = 0
         self.message, self.message_until = "", 0.0
@@ -98,6 +98,7 @@ class Composer:
         self.ed = None                       # the Editor (the Song with undo/redo)
         self.snap_i = 1
         self.quit_warned = False
+        self.pending = None
         self.sample_name = ""               # what a click in a drum lane places
         self.hit_sel = None                  # (lane, start tick) of the picked drum hit
         self.multi = set()                   # several picked notes: {(voice, start tick)}
@@ -190,7 +191,29 @@ class Composer:
     def inst_name(self, inst):
         return self.inst_names.get(dataclasses.astuple(inst), "custom")
 
-    def open_song_id(self, song_id):
+    def guard_switch(self, action, what="open another song"):
+        """Run `action` (something that replaces the loaded song) now when nothing is unsaved; otherwise ask first.
+        The Unsaved dialog offers Save (then `action` runs, but only if the save worked), Don't save, or Cancel."""
+        if not self.song_dirty:
+            return action()
+        self.pending = (action, what)
+        self.overlay = "unsaved"
+        return False
+
+    def finish_unsaved(self, choice):
+        """choice: 'save', 'discard' or 'cancel'."""
+        action, _ = self.pending or (None, "")
+        if choice == "cancel" or action is None:
+            self.pending, self.overlay = None, None
+            return False
+        if choice == "save" and not self.save():
+            return False                    # save failed or was cancelled: stay here, edits intact
+        self.pending, self.overlay = None, None
+        return action()
+
+    def open_song_id(self, song_id, guard=True):
+        if guard and self.song_dirty:
+            return self.guard_switch(lambda: self.open_song_id(song_id, guard=False))
         try:
             song = self.packages.get(song_id)
         except PackageError as e:
@@ -199,7 +222,9 @@ class Composer:
         ref = next((r for r in self.packages.songs() if r.id == song_id), None)
         return self.load_song(song, ref.title if ref else song_id, ref.path if ref else "", song_id)
 
-    def open_path(self, path):
+    def open_path(self, path, guard=True):
+        if guard and self.song_dirty:
+            return self.guard_switch(lambda: self.open_path(path, guard=False))
         p = Path(path)
         try:
             if p.suffix.lower() == ".csp":
@@ -210,7 +235,7 @@ class Composer:
                 if name is None:
                     name = self.packages.add(p).name
                 ids = [r.id for r in self.packages.songs() if r.package == name]
-                return bool(ids) and self.open_song_id(ids[0])
+                return bool(ids) and self.open_song_id(ids[0], guard=False)
             if p.suffix.lower() in (".mid", ".midi"):
                 song = midi.from_midi(p.read_bytes())
                 self.say("Imported %s: %d voice%s%s. Save to keep it." % (p.name, song.voices, "" if song.voices == 1 else "s",
@@ -613,6 +638,14 @@ class Composer:
         ctrl = mods & pygame.KMOD_CTRL
         if self.overlay == "new":
             self.new_dialog_key(e)
+            return
+        if self.overlay == "unsaved":
+            if k in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_s):
+                self.finish_unsaved("save")
+            elif k == pygame.K_ESCAPE:
+                self.finish_unsaved("cancel")
+            elif k == pygame.K_d:
+                self.finish_unsaved("discard")
             return
         if self.prompt:
             if k == pygame.K_RETURN or k == pygame.K_KP_ENTER:
@@ -1248,11 +1281,9 @@ class Composer:
 
     def new_from_generator_dialog(self):
         """Ctrl+N / New: open the New-song dialog (kind, mood, seed); OK opens the generated tune as a new, unsaved song."""
-        if self.song_dirty and not getattr(self, "new_warned", False):
-            self.new_warned = True
-            self.say("This song has unsaved edits. Save first, or choose New again to leave them behind.", 5.0)
+        if self.song_dirty:
+            self.guard_switch(self.new_from_generator_dialog, "start a new song")
             return
-        self.new_warned = False
         self.newdlg["seed"] = str(random.randint(1, 9999))
         self.newdlg["focus"] = "kind"
         self.ui.dd_open = None

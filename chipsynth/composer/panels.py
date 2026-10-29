@@ -60,6 +60,8 @@ def draw(app):
         prompt_overlay(app)
     elif app.overlay == "new":
         new_overlay(app)
+    elif app.overlay == "unsaved":
+        unsaved_overlay(app)
 
 
 def clip(surf, rect):
@@ -1206,7 +1208,8 @@ def songs_overlay(app):
         text(surf, f.small, ref.id, (row.right - 10, row.centery), th["accent_text"] if cur else th["dim"], "mr", row.w // 2 - 20)
         if ui.clicked(row) and body.collidepoint(ui.pos):
             app.overlay = None
-            app.open_song_id(ref.id)
+            if ref.id != app.song_id:
+                app.open_song_id(ref.id)
         y += int(f.line * 1.4)
     if app.packages.problems:
         y += 6
@@ -1233,6 +1236,28 @@ def prompt_overlay(app):
         app.finish_prompt(True)
     if ui.button(surf, th, f, (r.right - pad - 2 * bw - 8, y, bw, int(f.line * 1.3)), "Cancel", "Esc"):
         app.finish_prompt(False)
+    surf.set_clip(None)
+
+
+def unsaved_overlay(app):
+    """Switching songs with unsaved edits: Save (and switch), Don't save, or Cancel."""
+    surf, th, f, ui, s = app.screen, app.th, app.fonts, app.ui, app.scale
+    sw, sh = surf.get_size()
+    r = modal(app, min(sw - 80, int(560 * s)), int(f.line * 6.4))
+    pad = int(16 * s)
+    what = app.pending[1] if app.pending else "switch songs"
+    text(surf, f.bold, "Save your changes first?", (r.x + pad, r.y + pad), th["text"])
+    text(surf, f.ui, "\"%s\" has unsaved edits. Save them to %s." % (app.song.title or app.song_id or "This song", what),
+         (r.x + pad, r.y + pad + int(f.line * 1.5)), th["dim"], "tl", r.w - 2 * pad)
+    bw = int(120 * s)
+    y = r.bottom - pad - int(f.line * 1.3)
+    h = int(f.line * 1.3)
+    if ui.button(surf, th, f, (r.right - pad - bw, y, bw, h), "Save", "Enter"):
+        app.finish_unsaved("save")
+    if ui.button(surf, th, f, (r.right - pad - 2 * bw - 8, y, bw, h), "Don't save", "D"):
+        app.finish_unsaved("discard")
+    if ui.button(surf, th, f, (r.right - pad - 3 * bw - 16, y, bw, h), "Cancel", "Esc"):
+        app.finish_unsaved("cancel")
     surf.set_clip(None)
 
 
