@@ -226,3 +226,23 @@ Related design notes (not part of this work): an application-defined voice/DAC c
 - SID Factory II: https://github.com/Chordian/sidfactory2 and https://blog.chordian.net/sf2/
 - SID-Wizard: https://sourceforge.net/projects/sid-wizard/ ; CSDb release pages for 1.93-1.97 (csdb.dk), theoasisbbs.com coverage of 1.93 and 1.95
 - GoatTracker: Debian package `goattracker` 2.77+ds-1 and its copyright file; ChiptuneSAK's `goat_tracker` module (published constants for `GTS5`)
+
+## 9. Status
+
+**FamiStudio text import: built (slice 1).** `chipsynth/formats/famistudio_text.py`, with `envelope.py` (the fits) and `report.py`;
+`python -m chipsynth import PKG.csp FILE.txt`. The grammar, the note and channel names, the noise period rule and the envelope stepping were
+read from FamiStudio's own source (`FamistudioTextFile.cs`, `ChannelState*.cs`, MIT) on the author's machine, not from memory.
+
+Carried over: the five NES channels (Square 1 and 2 -> V1, V2; Triangle -> V3; Noise -> V4; DPCM -> D1), notes and stops, note volume,
+instruments (volume envelope fitted to `a d s r vol`, duty to `pw` or a `pws` sweep, a repeating arpeggio to `arp` / `arprate`, noise mode),
+DPCM samples with their rate, tempo (FamiStudio and FamiTracker tempo modes, NTSC and PAL), custom pattern lengths, the loop point, several songs per file.
+A row is `96 / BeatLength` ticks, so rows land on clean lengths, and the song's bpm is set from the row length on the NES.
+A bar is a pattern when the pattern is a whole number of beats, so the loop point lands on a bar.
+
+Reported, not carried over: expansion chips, pitch envelopes, slides, vibrato, speed changes, note delay and cut delay, fine pitch, grooves (played
+at their average), per-pattern tempo settings, looping DPCM, volume changes in the middle of a note, a volume envelope that is not an attack, decay and sustain
+(the closest fit is used and its error is printed), arpeggios that are not a repeating cycle. The noise channel keeps its order of pitches, not its true
+shift rate: the top periods are above what chipsynth can play.
+
+Not built: **writing** FamiStudio text; simulating table-driven instruments with short per-frame notes (decision 2 above; the fit and the report come first);
+reading a version check (the importer reads any 4.x file and ignores `Version`, where FamiStudio itself refuses other versions).
