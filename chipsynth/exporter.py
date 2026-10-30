@@ -25,8 +25,8 @@ from .player import TunePlayer
 from .song import Song
 from .synth import RATE, to_pcm16
 
-FORMATS = ("wav", "mid", "mml", "csp")
-SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp"}
+FORMATS = ("wav", "mid", "mml", "csp", "famistudio")
+SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp", ".txt": "famistudio"}
 
 
 class ExportError(Exception):
@@ -211,7 +211,7 @@ def format_of(path, fmt=None):
     return f
 
 
-def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None):
+def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region="ntsc", fs_version="4.5.3"):
     """Write song `song_id` of `pkg` to `path` as wav, mid, mml or csp (see the module doc).  Returns a Result."""
     opts = opts or AudioOptions()
     fmt = format_of(path, fmt)
@@ -229,6 +229,13 @@ def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(midi.to_midi(pkg.tune(song_id, lib)))
             r.written = [path]
+        elif fmt == "famistudio":
+            from .formats import famistudio_export
+            text, rep = famistudio_export.dump(pkg.tune(song_id, lib), region, fs_version, name=song_id if not pkg.songs[song_id].title else None)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8", newline="\n")
+            r.written = [path]
+            r.notes += rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
         elif fmt == "mml":
             text, files = components.song_to_mml(pkg, song_id, r.notes)
             r.written = [components._write(path, text)] + components._write_samples(path.parent / "samples", files)

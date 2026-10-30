@@ -23,7 +23,8 @@
                                     -d DIR   where to write (default .)   -o FILE   write one thing to FILE ('-' = stdout)
                                     --type T --name GLOB   which components   --midi   songs as .mid instead
   export-song SOURCE[:SONG] [SONG] -o OUT [options]      (also: render)
-                                  one song as wav, mid, mml or csp (from OUT's ending, or --format)
+                                  one song as wav, mid, mml, csp or famistudio (a .txt FamiStudio can import:
+                                  V1-V4 and D1 only; --region ntsc|pal, --fs-version X.Y.Z; what it left out is printed) (from OUT's ending, or --format)
                                     wav only: --volume V (0.5, 50%, -6dB)  --normalize [--peak DB, default -1]
                                               --start T  --end T   (1.5 | 250ms | 1:05.5 | 88200f = frames)
                                               --loops N  (trips round the loop)  --tail SECONDS  (default 2)
@@ -288,6 +289,8 @@ def export_song_cmd(args):
     p.add_argument("--end", metavar="T", help="(wav) where to stop (default: the end of the song and its tail)")
     p.add_argument("--loops", type=int, default=0, metavar="N", help="(wav) trips round the loop after the first pass")
     p.add_argument("--tail", type=float, default=2.0, metavar="S", help="(wav) seconds to let the last notes ring (default 2)")
+    p.add_argument("--region", choices=("ntsc", "pal"), default="ntsc", help="(famistudio) the frame rate the file is timed for (default ntsc)")
+    p.add_argument("--fs-version", metavar="X.Y.Z", default="4.5.3", help="(famistudio) the FamiStudio version the file says it is from (default 4.5.3)")
     add_library_options(p)
     a = p.parse_args(glue(args, "--volume", "--peak"))
     src, song = exporter.split_source(a.source)
@@ -298,7 +301,7 @@ def export_song_cmd(args):
     opts = exporter.AudioOptions(volume=exporter.gain(a.volume), normalize=a.normalize, peak_db=exporter.decibels(a.peak),
                                  start=exporter.frames(a.start), end=exporter.frames(a.end) if a.end else None,
                                  loops=a.loops, tail=a.tail)
-    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib)
+    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib, a.region, a.fs_version)
     for w in r.written:
         print("wrote", w, *(["(%.2fs, peak %s)" % (r.seconds, "silent" if r.peak_db is None else "%.1f dBFS" % r.peak_db)]
                             if r.format == "wav" and w == r.path else []))

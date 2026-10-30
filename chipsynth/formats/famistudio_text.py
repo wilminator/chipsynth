@@ -52,9 +52,9 @@ def split_line(line):
 
 def looks_like(text):
     """True when the first non-blank line is a FamiStudio `Project` line."""
-    for line in text.splitlines():
+    for line in text.lstrip("\ufeff").splitlines():
         if line.strip():
-            got = split_line(line.lstrip("﻿"))
+            got = split_line(line)
             return bool(got) and got[0] == "Project"
     return False
 
@@ -85,7 +85,7 @@ class FChannel:
 def parse(text):
     """Read the file into a Project (raises FamiStudioError when it is not one)."""
     prj, inst, song, chan, pat = None, None, None, None, None
-    for n, raw in enumerate(text.lstrip("﻿").splitlines(), 1):
+    for n, raw in enumerate(text.lstrip("\ufeff").splitlines(), 1):
         got = split_line(raw)
         if got is None:
             continue
