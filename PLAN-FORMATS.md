@@ -138,10 +138,14 @@ DefleMask (`.dmf`, closed source) is not a target: Furnace reads it, so Furnace 
 
 ### GoatTracker 2 `.sng` (from section 2's caveat: verify first)
 
-Little-endian, no compression: `GTS5` header; song name, author and copyright (32 bytes each); number of subtunes; per subtune and channel (3)
-an orderlist (pattern numbers with repeat/transpose codes and a restart marker); the instrument table (each 25 bytes: ADSR,
-wave-/pulse-/filter-/speed-table start pointers, vibrato delay, gate timer, first-wave byte, 16-character name); four tables (wave,
-pulse, filter, speed) as two byte columns each; then patterns of up to 128 rows x 4 bytes (note, instrument, command, data).
+Verified against GoatTracker 2.77 (r172, `gsong.c`, `gcommon.h`, `gplay.c`; GPL-2+, read only, nothing copied). No compression:
+`GTS5` header (the loader also takes `GTS3` and `GTS4`); song name, author and copyright (32 bytes each); a byte with the number of subtunes;
+per subtune and channel (3) a length byte L and then L+1 bytes of orderlist (the last is the restart position); a byte with the number of
+instruments (highest used, up to 64), each 9 bytes (AD, SR, wave, pulse, filter and speed table pointers, vibrato delay, gate timer,
+first-wave byte) and a 16-byte name; four tables (wave, pulse, filter, speed), each a length byte and then the left column and the right column
+(255 rows at most); a byte with the number of patterns (up to 208), each a row count (up to 128) and rows of 4 bytes (note, instrument, command, data).
+Orderlist bytes: `0x00-0xcf` pattern, `0xd0-0xdf` repeat count, `0xe0-0xef` transpose (`0xf0` = none), `0xff` loop to the next byte.
+Pattern notes: `0x60-0xbc` notes, `0xbd` rest, `0xbe` key off, `0xbf` key on, `0xff` end of pattern.
 The format does not record the target machine (PAL/NTSC) or multispeed: the importer needs an option for both.
 
 What is hard: **the tables are programs**. A GoatTracker instrument is a pointer into wave / pulse / filter tables that step
@@ -246,3 +250,10 @@ shift rate: the top periods are above what chipsynth can play.
 
 Not built: **writing** FamiStudio text; simulating table-driven instruments with short per-frame notes (decision 2 above; the fit and the report come first);
 reading a version check (the importer reads any 4.x file and ignores `Version`, where FamiStudio itself refuses other versions).
+
+**GoatTracker `.sng` import: slice 1 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
+errors), the three voices as V1-V3, notes, rests, key-offs, order list repeat and transpose, the restart position as the loop point, tempo changes,
+and per instrument the ADSR, the first waveform and the starting pulse width. A frame is 4 ticks, so timing is exact at any speed. Wavetable programs,
+pulse sweeps, filter and speed tables and pattern commands other than tempo are reported, not carried over.
+Not built: the command-line option (`--region`, `--multispeed`), table classification (arpeggio, pulse sweep, vibrato), a writer.
+Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer).

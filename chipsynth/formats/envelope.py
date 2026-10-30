@@ -56,7 +56,7 @@ def fit_volume(values, loop, release, length, hz=FRAME_HZ):
     peak = max(values[:length])
     gate_frames = FIT_FRAMES
     target = np.array(resolve(values, loop, release, length, gate_frames), dtype=np.float64) / peak
-    t = np.arange(gate_frames) / hz
+    t = (np.arange(gate_frames) + 0.5) / hz                     # the middle of each frame
     best = (9.0, 0, 8, 10)
     for a in range(16):
         for d in range(16):
@@ -71,7 +71,7 @@ def fit_volume(values, loop, release, length, hz=FRAME_HZ):
         tail = np.array(resolve(values, loop, release, length, release + 60, released_at=release), dtype=np.float64) / peak
         base = tail[release - 1] if release > 0 else 1.0
         rest = tail[release:]
-        tt = np.arange(len(rest)) / hz
+        tt = (np.arange(len(rest)) + 0.5) / hz
         rbest = (9.0, 0)
         for rr in range(16):
             e = float(np.sqrt(np.mean((base * np.exp(-6.9 * tt / (DECAY_MS[rr] / 1000.0)) - rest) ** 2))) if len(rest) else 0.0
