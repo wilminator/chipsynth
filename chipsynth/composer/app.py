@@ -21,6 +21,7 @@ from chipsynth.mml import SCALES
 from chipsynth.synth import RATE
 
 from . import layout as L, model as M, panels, tracker as TR, ui as U
+from .filemenu import FileMenu
 from .prefs import Prefs
 from .tracks import Stack, clamp_height
 
@@ -55,7 +56,7 @@ class NullOut:
         return self.player
 
 
-class Composer:
+class Composer(FileMenu):
     def __init__(self, screen, prefs=None, packages=None, lib=None, out=None, prefs_path=None, root=None):
         self.screen = screen
         self.prefs = prefs or Prefs()
@@ -85,7 +86,13 @@ class Composer:
         self.note_sel = None                 # (voice, index into roll.notes[voice])
         self.note_hover = None
         self.drag = None
-        self.overlay = None                  # None | "songs" | "help" | "prompt" | "new" | "unsaved" | "collapse"
+        self.overlay = None                  # None | "songs" | "help" | "prompt" | "new" | "unsaved" | "collapse" | "menu" | "fileopts" | "report"
+        self.menu = None                     # the File menu: {hi, sub, subhi, focus, ...} while it is open
+        self.menu_geo = {}                   # its rows' rectangles from the last draw: {"main": [(rect, item)], "sub": [...]}
+        self.file_btn = None                 # the File button's rectangle, from the last draw
+        self.fileopts = None                 # the import / export options dialog
+        self.report_view = None              # the report overlay: {title, lines, scroll}
+        self.last_report = None              # (title, lines) of the latest import / export
         self.overlay_scroll = 0
         self.insp_scroll = 0
         self.message, self.message_until = "", 0.0
@@ -138,10 +145,11 @@ class Composer:
         self.last_save = time.time()
 
     # ------------------------------------------------------------ songs
-    def load_song(self, song, label="", source="", song_id=""):
-        """Show and (re)play-ready a Song.  Returns False (and says why) if it does not compile."""
+    def load_song(self, song, label="", source="", song_id="", lib=None):
+        """Show and (re)play-ready a Song.  Returns False (and says why) if it does not compile.  `lib` is the library to
+        compile with when it is not the window's (a song imported with samples of its own)."""
         try:
-            ed = Editor(song, self.lib_for(song_id))
+            ed = Editor(song, lib or self.lib_for(song_id))
         except mml.MMLError as e:
             self.say("Can't open %s: %s" % (label or "song", e))
             return False
@@ -486,6 +494,8 @@ class Composer:
         elif t == getattr(pygame, "DROPFILE", -1):
             if str(e.file).lower().endswith(".wav"):
                 self.import_wav(e.file)
+            elif str(e.file).lower().endswith((".sng", ".txt")):
+                self.import_begin(e.file)                  # GoatTracker / FamiStudio: asks for the options it needs
             else:
                 self.open_path(e.file)
 
@@ -680,6 +690,17 @@ class Composer:
         if self.overlay == "new":
             self.new_dialog_key(e)
             return
+        if self.overlay == "menu":
+            if not ctrl:
+                self.menu_key(e)
+                return
+            self.menu_close()                              # a Ctrl shortcut closes the menu and then does its work
+        if self.overlay == "fileopts":
+            self.fileopts_key(e)
+            return
+        if self.overlay == "report":
+            self.report_key(e)
+            return
         if self.overlay == "collapse":
             if k in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 self.collapse_apply()
@@ -740,6 +761,8 @@ class Composer:
             self.new_from_generator_dialog()
         elif ctrl and k == pygame.K_e:
             self.export_midi_dialog()
+        elif k == pygame.K_F10:
+            self.menu_open()
         elif k == pygame.K_q and self.selection():
             self.quantize_selection()
         elif ctrl and k == pygame.K_s:
@@ -1339,10 +1362,11 @@ class Composer:
         tick = self.cursor_tick
         self.edit(lambda: self.ed.set_tempo_at(tick, round(self.tune.bpm_at(tick))))
 
-    def new_from_generator_dialog(self):
-        """Ctrl+N / New: open the New-song dialog (kind, mood, seed); OK opens the generated tune as a new, unsaved song."""
-        if self.song_dirty:
-            self.guard_switch(self.new_from_generator_dialog, "start a new song")
+    def new_from_generator_dialog(self, guard=True):
+        """Ctrl+N / New: open the New-song dialog (kind, mood, seed); OK opens the generated tune as a new, unsaved song.
+        (After "Don't save" the song still counts as edited, so the guarded retry must not ask again: guard=False.)"""
+        if guard and self.song_dirty:
+            self.guard_switch(lambda: self.new_from_generator_dialog(guard=False), "start a new song")
             return
         self.newdlg["seed"] = str(random.randint(1, 9999))
         self.newdlg["focus"] = "kind"

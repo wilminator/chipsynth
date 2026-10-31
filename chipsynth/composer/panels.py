@@ -64,6 +64,12 @@ def draw(app):
         unsaved_overlay(app)
     elif app.overlay == "collapse":
         collapse_overlay(app)
+    elif app.overlay == "menu":
+        menu_overlay(app)
+    elif app.overlay == "fileopts":
+        fileopts_overlay(app)
+    elif app.overlay == "report":
+        report_overlay(app)
 
 
 def clip(surf, rect):
@@ -117,6 +123,11 @@ def topbar(app):
         return f.ui.size(label)[0] + int(24 * s)
 
     x = pad
+    w = width("File")
+    app.file_btn = (x, y, w, bh)
+    if ui.button(surf, th, f, (x, y, w, bh), "File", "New, Open, Save, Import and Export (F10)", on=app.overlay == "menu"):
+        app.menu_open()
+    x += w + gap
     w = width("Songs")
     if ui.button(surf, th, f, (x, y, w, bh), "Songs", "Choose a song from the loaded packages and files"):
         app.overlay = "songs"
@@ -1305,6 +1316,155 @@ def unsaved_overlay(app):
     surf.set_clip(None)
 
 
+def menu_overlay(app):
+    """The File menu: a column under the File button, and a second column beside Import / Export while one is open.
+    Hovering a row picks it (and opens its submenu), a click runs it, a click anywhere else or Esc closes the menu."""
+    surf, th, f, ui, s = app.screen, app.th, app.fonts, app.ui, app.scale
+    m = app.menu
+    if m is None:
+        app.overlay = None
+        return
+    sw, sh = surf.get_size()
+    fb = app.file_btn or (8, 8, 60, 30)
+    rh, sep, pad = int(f.line * 1.45), int(f.line * 0.5), int(5 * s)
+    moved = ui.pos != m["mouse"]
+    m["mouse"] = ui.pos
+    geo = app.menu_geo = {"main": [], "sub": []}
+
+    def column(x, y, items, name, sel, active):
+        labels = [i["label"] for i in items if i]
+        w = max(f.ui.size(t)[0] for t in labels) + max([f.small.size(i.get("hint", ""))[0] for i in items if i] + [0]) + int(64 * s)
+        h = sum(rh if i else sep for i in items) + 2 * pad
+        r = pygame.Rect(max(2, min(x, sw - w - 2)), max(2, min(y, sh - h - 2)), w, h)
+        rrect(surf, th["panel"], r, 8, th["accent"] if active else th["line"], 2)
+        yy, rects = r.y + pad, []
+        for idx, it in enumerate(items):
+            if it is None:
+                pygame.draw.line(surf, th["line"], (r.x + 8, yy + sep // 2), (r.right - 8, yy + sep // 2))
+                yy += sep
+                continue
+            row = pygame.Rect(r.x + 4, yy, r.w - 8, rh)
+            ok = it.get("enabled", True)
+            if moved and ok and ui.hover(row):
+                m["focus"] = "sub" if name == "sub" else "main"
+                m["subhi" if name == "sub" else "hi"] = idx
+                if name == "main":
+                    m["sub"] = it.get("sub")
+                    if m["sub"]:
+                        m["subhi"] = app.first_enabled(app.submenu_items(m["sub"]), 0, 1)
+            lit = ok and idx == sel
+            if lit:
+                rrect(surf, th["accent"] if active else th["hot"], row, 5)
+            fg = (th["accent_text"] if active else th["text"]) if lit else (th["text"] if ok else mix(th["dim"], th["panel"], 0.4))
+            text(surf, f.ui, it["label"], (row.x + 10, row.centery), fg, "ml", row.w - 20)
+            if it.get("sub"):
+                text(surf, f.ui, ">", (row.right - 10, row.centery), fg, "mr")
+            elif it.get("hint"):
+                text(surf, f.small, it["hint"], (row.right - 10, row.centery), fg if lit else th["dim"], "mr")
+            rects.append((row, it))
+            yy += rh
+        return r, rects
+
+    main = app.menu_items()
+    r1, rows = column(fb[0], fb[1] + fb[3] + 2, main, "main", m["hi"], m["focus"] == "main" or not m["sub"])
+    geo["main"] = rows
+    outside = [r1]
+    if m["sub"]:
+        parent = next((row for row, it in rows if it.get("sub") == m["sub"]), None)
+        sub = app.submenu_items(m["sub"])
+        r2, srows = column(r1.right - 2, parent.y - pad if parent else r1.y, sub, "sub", m["subhi"], m["focus"] == "sub")
+        geo["sub"] = srows
+        outside.append(r2)
+    ui.tip = ""
+    if m["fresh"]:
+        m["fresh"] = False                               # the click that opened the menu is not a click outside it
+    elif ui.click is not None:
+        clicked = next((it for row, it in geo["sub"] + rows if ui.clicked(row)), None)
+        if clicked is not None:
+            app.menu_run(clicked)
+        elif not any(r.collidepoint(ui.click) for r in outside):
+            app.menu_close()
+
+
+def fileopts_overlay(app):
+    """The import / export options: one row per choice (a click or Left / Right changes it), OK and Cancel."""
+    surf, th, f, ui, s = app.screen, app.th, app.fonts, app.ui, app.scale
+    d = app.fileopts
+    if d is None:
+        app.overlay = None
+        return
+    sw, sh = surf.get_size()
+    w = min(sw - 40, int(520 * s))
+    pad = int(16 * s)
+    note = wrap(f.small, d["note"], w - 2 * pad) if d["note"] else []
+    rh = int(f.line * 1.5)
+    h = pad * 2 + int(f.line * 1.7) + len(d["rows"]) * (rh + int(f.line * 0.4)) + len(note) * (f.small.get_linesize()) + int(f.line * 2.2)
+    r = modal(app, w, h)
+    text(surf, f.bold, d["title"], (r.x + pad, r.y + pad), th["text"], "tl", r.w - 2 * pad)
+    y = r.y + pad + int(f.line * 1.7)
+    lw = int(100 * s)
+    boxes = []
+    for i, row in enumerate(d["rows"]):
+        text(surf, f.ui, row["label"], (r.x + pad, y + rh // 2), th["dim"], "ml")
+        box = pygame.Rect(r.x + pad + lw, y, r.w - 2 * pad - lw, rh)
+        rrect(surf, th["hot"] if ui.hover(box) else th["panel2"], box, 5, th["accent"] if d["focus"] == i else th["line"])
+        text(surf, f.ui, row["choices"][row["i"]][1], (box.x + 10, box.centery), th["text"], "ml", box.w - 40)
+        text(surf, f.small, "< >", (box.right - 8, box.centery), th["dim"], "mr")
+        if ui.clicked(box):
+            app.fileopts_step(i, 1)
+        boxes.append(box)
+        y += rh + int(f.line * 0.4)
+    for line in note:
+        text(surf, f.small, line, (r.x + pad, y), th["dim"])
+        y += f.small.get_linesize()
+    bw, bh = int(130 * s), int(f.line * 1.3)
+    by = r.bottom - pad - bh
+    ok = pygame.Rect(r.right - pad - bw, by, bw, bh)
+    cancel = pygame.Rect(ok.x - 8 - int(90 * s), by, int(90 * s), bh)
+    app.menu_geo["opts"] = dict(rows=boxes, ok=ok, cancel=cancel)
+    if ui.button(surf, th, f, ok, d["ok"], "Enter"):
+        app.fileopts_finish(True)
+    elif ui.button(surf, th, f, cancel, "Cancel", "Esc"):
+        app.fileopts_finish(False)
+    surf.set_clip(None)
+
+
+def report_overlay(app):
+    """What an import or export approximated, left out or warns about; scrolls when long."""
+    surf, th, f, ui, s = app.screen, app.th, app.fonts, app.ui, app.scale
+    v = app.report_view
+    if v is None:
+        app.overlay = None
+        return
+    sw, sh = surf.get_size()
+    w = min(sw - 40, int(780 * s))
+    pad = int(16 * s)
+    rows = []
+    for line in v["lines"]:
+        tag = line.partition(": ")[0]
+        col = th["dim"] if tag == "note" else th["warn"]
+        for n, part in enumerate(wrap(f.ui, line, w - 2 * pad - int(10 * s))):
+            rows.append((part, col, n == 0))
+    lh = f.line
+    body_h = min(len(rows), max(4, int((sh - 160) / lh))) * lh
+    h = pad * 2 + int(f.line * 2.2) + body_h + int(f.line * 2.0)
+    r = modal(app, w, min(sh - 20, h))
+    text(surf, f.bold, v["title"], (r.x + pad, r.y + pad), th["text"], "tl", r.w - 2 * pad)
+    show = max(1, body_h // lh)
+    v["scroll"] = max(0, min(v["scroll"], max(0, len(rows) - show)))
+    y = r.y + pad + int(f.line * 1.8)
+    for part, col, first in rows[v["scroll"]:v["scroll"] + show]:
+        text(surf, f.ui, part, (r.x + pad + (0 if first else int(10 * s)), y), col, "tl", r.w - 2 * pad)
+        y += lh
+    if len(rows) > show:
+        text(surf, f.small, "%d-%d of %d lines (Up / Down scroll)" % (v["scroll"] + 1, min(len(rows), v["scroll"] + show), len(rows)),
+             (r.x + pad, r.bottom - pad - int(f.line * 1.3) + 4), th["dim"])
+    bw, bh = int(90 * s), int(f.line * 1.3)
+    if ui.button(surf, th, f, (r.right - pad - bw, r.bottom - pad - bh, bw, bh), "OK", "Enter"):
+        app.overlay = app.report_view = None
+    surf.set_clip(None)
+
+
 MOOD_LABEL = {"": "any"}
 
 
@@ -1399,6 +1559,9 @@ HELP = (
     ("Ctrl+N", "new song from the generator (a dialog: kind, mood, seed)"),
     ("P", "make a pattern from the selected notes"), ("Shift+Space", "loop just the selected stretch"),
     ("Q", "snap the selected notes to the grid"), ("Ctrl+E", "export a MIDI file (drop a .mid to import one)"), ("Drag a note", "move it; drag its right end to resize"),
+    ("File / F10", "the File menu: New, Open, Save, Import, Export"),
+    ("Menu keys", "Up / Down pick, Right / Left open or close Import / Export, Enter runs"),
+    ("Drop .sng/.txt", "import a GoatTracker song / FamiStudio text"),
     ("Drum lanes", "click D1 / D2 to place the picked sample; drag to move"),
     ("Drop a .wav", "import it as a drum sample"),
     ("Delete", "erase the selected note or drum hit"), ("Arrows (note)", "with a note picked: nudge it (Shift = octave)"),
