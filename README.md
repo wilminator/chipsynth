@@ -84,6 +84,37 @@ of the same height, one below the other, scrolling up and down (the track height
 **T** buttons, remembered between sessions); **Piano roll** is one large piano roll for all the voices; **Tracker** is
 the grid with time running down the page.
 
+### The File menu
+
+The **File** button at the left of the top bar (or F10) opens the menu; Up / Down, Right / Left (open or close a submenu),
+Enter and Esc work it from the keyboard. The shortcuts keep working with or without the menu.
+
+| entry | does |
+|---|---|
+| New from generator... (Ctrl+N), New blank song | a generated tune, or four empty bars; both open unsaved |
+| Open... (Ctrl+O), Open from packages... | a `.csp` / `.mml` / `.mid` file chooser; the Songs list of the loaded packages |
+| Save (Ctrl+S), Save As... (Ctrl+Shift+S) | as before: `.csp` writes a package, `.mml` text, `.mid` a MIDI export |
+| Import > MML, MIDI, FamiStudio text (.txt), GoatTracker 2 (.sng), WAV sample | the same readers as `python -m chipsynth import` |
+| Export > WAV, MIDI (Ctrl+E), MML, FamiStudio text (.txt), Package copy (.csp) | the same writer as `python -m chipsynth export-song`, for the song as it is now (unsaved edits included) |
+| Last report... | shows the latest import / export report again |
+
+What a conversion approximated or left out is never silent: the status line counts it, and a short report window lists
+every line (a clean conversion needs no window). Dropping a `.sng`, `.txt` or `.wav` on the window imports it too.
+
+* **WAV** export asks for the trips round the loop, normalizing to -1 dBFS, and the whole song or just the selected notes;
+  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL; **GoatTracker** import asks the region
+  (the file does not record it), the multispeed and which subtune; a FamiStudio file with several songs asks which.
+* **One song** from a FamiStudio or GoatTracker file opens as a new unsaved song (Save asks where to put it), like a
+  MIDI file. **Several songs** are written into a `.csp` package as `import` does: the open song's package when it has
+  a `.csp` file, else `NAME.csp` beside the imported file (an existing file keeps its other songs, and the same ids are
+  replaced, with a copy of the old file in `backups/`). The first of them opens. The options window says where they go.
+* Anything that would replace the open song (New, Open, Import) first asks about unsaved edits: Save, Don't save, Cancel.
+* Import MML makes an unsaved copy (Open edits the file itself). Export over an existing file keeps a copy in `backups/`.
+
+In Python the menu's work is methods that take a path (no file dialog): `Composer.import_file(path, kind, region=,
+multispeed=, song=, package=)`, `Composer.export_as(fmt, path, loops=, normalize=, part=, region=)` and `new_blank()`,
+over the window-free helpers in `composer/fileops.py`.
+
 ## Command line (`python -m chipsynth`)
 
 A `.csp` package holds songs and what they share. Its *components* are of five types: `song`, `instrument`, `fx` (effect
