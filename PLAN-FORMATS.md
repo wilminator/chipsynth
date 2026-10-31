@@ -251,9 +251,26 @@ shift rate: the top periods are above what chipsynth can play.
 Not built: **writing** FamiStudio text; simulating table-driven instruments with short per-frame notes (decision 2 above; the fit and the report come first);
 reading a version check (the importer reads any 4.x file and ignores `Version`, where FamiStudio itself refuses other versions).
 
-**GoatTracker `.sng` import: slice 1 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
+**GoatTracker `.sng` import: slices 1 and 2 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
 errors), the three voices as V1-V3, notes, rests, key-offs, order list repeat and transpose, the restart position as the loop point, tempo changes,
-and per instrument the ADSR, the first waveform and the starting pulse width. A frame is 4 ticks, so timing is exact at any speed. Wavetable programs,
-pulse sweeps, filter and speed tables and pattern commands other than tempo are reported, not carried over.
-Not built: the command-line option (`--region`, `--multispeed`), table classification (arpeggio, pulse sweep, vibrato), a writer.
-Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer).
+and per instrument the ADSR, the first waveform and the starting pulse width. A frame is 4 ticks (4/N with multispeed N), so timing is exact at any speed.
+
+Slice 2 (command line and table classification): `python -m chipsynth import PKG.csp FILE.sng [--region pal|ntsc] [--multispeed 1|2|4] [--song N] [--report FILE]`
+(found by the `.sng` ending or by `GTS3/4/5` at the start; the song id is the file name through `Package.safe_id`, with `_N` added when a file has several
+subtunes). `--region` defaults to pal because the file does not say. The player's tables were run as `gplay.c` (r172, GPL-2+, read only, nothing copied) steps them:
+
+| idiom | becomes | what is checked |
+|---|---|---|
+| wavetable that loops from its first row over relative notes (`0x00-0x7f`; `0x80` = no change) | `arp`, `arprate` | each row is a frame, a delay row (`0x00-0x0f`) takes effect after its delay, jumps are free; run per frame, fitted by `fit_arpeggio` (8 steps at most, up to 32 a beat) |
+| pulse table: set rows (`0x8n`) and timed ramps (frames, signed speed) that rise and fall | `pws_from`, `pws_to`, `pws_rate` | run per frame to its repeat; a rise and a fall is a sweep, a ramp that jumps back or ends is played as a back-and-forth sweep (reported as approximate); only on a pulse wave |
+| speed table entry as vibrato, from pattern command 4 or the instrument's own pointer (which only works with a vibrato delay of 1 or more) | `vib_rate`, `vib_depth` on an instrument variant `NAME_vibR_D` | the swing is run per frame (the player's turn-around counter), its period gives the rate and its size against the note's SID frequency gives the depth, so a fixed entry is deeper on a low note; entries with the high bit set are relative to the note |
+
+Still reported, not carried over: wavetables with absolute notes (`0x81` and up), commands, waveform changes with no arpeggio, rows that play once before a loop, or no loop;
+pulse tables that zigzag or change width before setting one; filter tables; portamento, tone portamento and the other pattern commands; vibrato changed part-way through a note;
+vibrato delays (vibrato starts at once); vibrato of a speed entry that is missing, has speed 0 or is under 1/32 of a semitone.
+Vibrato is a triangle swing in the player and a sine in chipsynth, so it is always listed as approximate.
+
+Fixed in slice 2: the song's bpm was multiplied by the multispeed, which played a multispeed song at N times its speed; it follows the video rate only (125 pal, 150 ntsc).
+Instrument names are made into identifiers (anything but letters, digits and `_` becomes `_`).
+Not built: a writer. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
+the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
