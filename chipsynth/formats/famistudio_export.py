@@ -67,6 +67,7 @@ class _Writer:
         self.hz = PAL_HZ if self.pal else FRAME_HZ
         self.r = Report()
         self.inst_used = {}               # (inst key, kind) -> FamiStudio name
+        self.inst_twin = {}               # (the instrument's text, kind) -> FamiStudio name: equal instruments are written once
         self.inst_lines = []
         self.names = {}                   # id(Instrument) -> chipsynth name
         for n, i in tune.instruments.items():
@@ -114,14 +115,19 @@ class _Writer:
         key = (id(inst), kind)
         if key in self.inst_used:
             return self.inst_used[key]
-        base = self.names.get(id(inst)) or "Inst%d" % (len(self.inst_used) + 1)
+        twin = (repr(inst), kind)                      # an inline tweak (vib, pws, filter) makes a fresh object each time:
+        if twin in self.inst_twin:                     # one that equals an instrument already written is the same instrument
+            self.inst_used[key] = self.inst_twin[twin]
+            return self.inst_twin[twin]
+        taken = set(self.inst_used.values())
+        base = self.names.get(id(inst)) or "Inst%d" % (len(taken) + 1)
         name = base + ("_noise" if kind == "noise" else "")
         n = 1
-        taken = set(self.inst_used.values())
         while name in taken:
             n += 1
             name = "%s_%d" % (base, n)
         self.inst_used[key] = name
+        self.inst_twin[twin] = name
         self.inst_lines += self.inst_text(inst, name, kind, base)
         return name
 
@@ -148,7 +154,7 @@ class _Writer:
             lines.append("\t\tEnvelope" + _attr("Type", "Arpeggio") + _attr("Length", len(vals)) + _attr("Loop", 0)
                          + _attr("Values", ",".join(map(str, vals))))
         dropped = [w for w, on in (("vibrato", inst.vib_rate and inst.vib_depth), ("slide", inst.slide), ("pulse-width sweep", inst.pws_rate),
-                                   ("filter", inst.filt), ("pan", inst.pan)) if on]
+                                   ("filter", inst.filt), ("filter sweep", inst.filt and inst.fs_rate), ("pan", inst.pan)) if on]
         if dropped:
             self.r.drop("instrument '%s': %s" % (label, ", ".join(dropped)))
         return lines

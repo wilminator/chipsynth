@@ -223,7 +223,7 @@ Not in C2 (later): multi-select, copy / paste, quantize (C7); the toolbar hides 
 2. Part A step 4 (imports) and the README quick start, one zip.
 3. C0 (Song model, compiler, MML import / export), then C0b (the package format, `PackageSet`, game wiring), then C1 on.
    Confirming depth with you before each milestone (your credits rule).
-4. Still open from earlier and slotted in when you say: generator use of effects / degrees / echo / filter, the remaining SID importers
+4. Still open from earlier and slotted in when you say: the remaining SID importers
    (SID-Wizard, SID Factory II, Furnace; the FamiStudio text and GoatTracker importers are built), packaging for PyPI.
 
 COMPOSER C8 (2026-10-15) DONE: make pattern from selection (P; Editor.make_pattern checks the sound is unchanged), loop just the selection (Shift+Space; model.tune_range), New from generator (Ctrl+N / New button; asks "kind [seed] [mood]"). NEXT (backlog): tracker volume column, key / per-note effects from the roll, WAV import options.
@@ -232,3 +232,4 @@ COMPOSER FILE MENU (2026-10-30) DONE (PR #21): New, Open, Save, Import and Expor
 
 COMPOSER TRACKER VOLUME COLUMN (2026-11-22) DONE: per-note volume column (`,` `.` steps, `/` then digits types a value; Editor.set_volume, one undo step, round-trips through MML), drawn dim when it is the voice's commonest volume (tracker.voice_default). The older "not done: a volume column" notes in C6 and the status line are out of date. NEXT (backlog): as the C8 line above, minus the volume column.
 COMPOSER MIDI DRUMS (2026-11-22) DONE (branch midi-drums): `from_midi` maps General MIDI channel 10 notes to the kit samples on D1 / D2 (`midi.GM_DRUMS`; velocity = volume 1-15; the generator's lane and priority rules, a loser moves to the free lane; unmappable percussion and hits that fit on neither lane go to `song.warnings`, shown by the CLI and as a report in the composer); `to_midi` writes kit hits of D1 / D2 as channel 10 (`midi.KIT_GM`, `midi.drum_hits` also lists what has no note: kit_hey, the pitched bass, own samples). Files without percussion are unchanged. Tests: `DrumImportTests`, `DrumExportTests` in `test_midi.py`.
+GENERATOR EFFECTS (2026-11-22) DONE (branch generator-effects): opt-in words `echo reverb filter vibrato slide sweep` (`fx`) and `degrees` for `generate`, the CLI and the composer's New dialog; see README 'The generator and its options' and DESIGN-MUSIC 'Generator effect options'. NEXT: a game's music.toml reader passes `fx` / `degrees` through; a GoatTracker writer would need to report them as dropped.
