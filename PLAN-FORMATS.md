@@ -248,8 +248,20 @@ at their average), per-pattern tempo settings, looping DPCM, volume changes in t
 (the closest fit is used and its error is printed), arpeggios that are not a repeating cycle. The noise channel keeps its order of pitches, not its true
 shift rate: the top periods are above what chipsynth can play.
 
-Not built: **writing** FamiStudio text; simulating table-driven instruments with short per-frame notes (decision 2 above; the fit and the report come first);
-reading a version check (the importer reads any 4.x file and ignores `Version`, where FamiStudio itself refuses other versions).
+**FamiStudio text export: built** (PR #19). `chipsynth/formats/famistudio_export.py`, with the reader as its check (what is written must read back; `tests/test_famistudio_export.py`).
+`python -m chipsynth export-song SOURCE[:SONG] -o OUT.txt [--region ntsc|pal] [--fs-version X.Y.Z]` (default 4.5.3, NTSC), and the composer's File > Export > FamiStudio text.
+V1, V2 -> Square 1, 2; V3 -> Triangle; V4 -> Noise; D1 -> DPCM. The volume ADSR and the arpeggio are sampled at the frame rate into FamiStudio envelopes. The file says it was
+written by FamiStudio `--fs-version`, because FamiStudio only reads files whose version starts like its own. Dropped, and said so in the Report: more than four voices and any DAC
+beyond D1, echo, reverb, the filter, vibrato, slide, pan, pulse-width sweeps and tempo changes. **Not verified:** the files have been read back by chipsynth's own importer only,
+not opened in a real FamiStudio (a test set of generated songs, NTSC and PAL, was made for the author to check by eye and ear).
+
+**Composer File menu: built** (PR #21). `chipsynth/composer/filemenu.py`: New (blank or from the generator), Open, Save, Save As, Import (MML, MIDI, FamiStudio text, GoatTracker) and
+Export (WAV, MIDI, MML, FamiStudio text, package copy), the same writers and importers as the command line, with a "Last report..." entry and the unsaved-edits dialog
+(Save, Don't save, Cancel) before anything replaces the open song.
+
+Not built: simulating table-driven instruments with short per-frame notes (decision 2 above; the fit and the report come first);
+reading a version check (the importer reads any 4.x file and ignores `Version`, where FamiStudio itself refuses other versions);
+the FamiStudio binary `.fms` (import only, if at all); expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM; the importer skips their channels and reports them).
 
 **GoatTracker `.sng` import: slices 1 and 2 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
 errors), the three voices as V1-V3, notes, rests, key-offs, order list repeat and transpose, the restart position as the loop point, tempo changes,
@@ -272,5 +284,5 @@ Vibrato is a triangle swing in the player and a sine in chipsynth, so it is alwa
 
 Fixed in slice 2: the song's bpm was multiplied by the multispeed, which played a multispeed song at N times its speed; it follows the video rate only (125 pal, 150 ntsc).
 Instrument names are made into identifiers (anything but letters, digits and `_` becomes `_`).
-Not built: a writer. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
+Not built: a writer (GoatTracker `.sng` export); the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
 the tables were checked against the player's source and against hand-built files, not against real songs or by ear.

@@ -1160,14 +1160,17 @@ class NewFromGeneratorTests(unittest.TestCase):
         self.assertTrue(a.new_from_generator("town 3"))                      # still works with none
         self.assertFalse(a.new_from_generator("town 3 dac spooky"))
 
-    def test_unsaved_edits_need_a_second_press(self):
+    def test_unsaved_edits_ask_before_the_new_dialog(self):
         a = self.app
         a.new_from_generator("town 1")
         a.ed.add_note(0, 96 * 400, 96, 60)
         a.sync()
         a.new_from_generator_dialog()
-        self.assertIsNone(a.overlay)                                 # warned instead
+        self.assertEqual(a.overlay, "unsaved")                       # the File menu's unsaved-edits dialog asks first (PR #21)
+        a.finish_unsaved("cancel")
+        self.assertIsNone(a.overlay)
         a.new_from_generator_dialog()
+        a.finish_unsaved("discard")                                  # Don't save: the New dialog opens, without asking again
         self.assertEqual(a.overlay, "new")
 
     # ---- the dialog itself
