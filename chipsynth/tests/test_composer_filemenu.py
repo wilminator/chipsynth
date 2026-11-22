@@ -15,6 +15,7 @@ import numpy as np
 import pygame
 
 from chipsynth import midi, mml, musicgen, package as pk
+from chipsynth.composer import fileops as fo
 from chipsynth.composer.app import Composer
 from chipsynth.composer.filemenu import significant
 from chipsynth.composer.prefs import Prefs
@@ -408,6 +409,47 @@ class ImportTests(Base):
         self.assertEqual(a.song_id, "two:two_Main_Theme")
         self.assertTrue(pk.load(self.dir / "two.csp").samples)
 
+    def test_famistudio_project_fms_opens_like_text_and_reports_what_it_left_out(self):
+        from chipsynth.tests.test_famistudio_binary import tiny_fms
+        a = self.a
+        self.assertEqual(fo.kind_of("x.fms"), "famistudio_fms")
+        p = self.write("tiny.fms", tiny_fms())
+        a.import_begin(p)
+        self.assertNotEqual(a.overlay, "fileopts")               # one song: no dialog
+        self.assertEqual(a.source, "")
+        self.assertTrue(any("kick" in n.lower() for n in a.ed.sample_names()), a.ed.sample_names())
+        self.assertTrue(significant(a.last_report[1]))
+        self.assertTrue(any("format version 19" in x for x in a.last_report[1]))
+
+    def test_famistudio_project_with_two_songs_asks_which(self):
+        from chipsynth.tests.test_famistudio_binary import tiny_project, write_fms
+        a = self.a
+        proj = tiny_project()
+        proj["songs"].append(dict(proj["songs"][0], id=6, name="Second Theme"))
+        a.import_begin(self.write("two.fms", write_fms(proj)))
+        self.assertEqual(a.overlay, "fileopts")
+        a.frame()
+        songs = next(r for r in a.fileopts["rows"] if r["key"] == "song")
+        self.assertEqual([t for _, t in songs["choices"]], ["All 2 songs", "Main Theme", "Second Theme"])
+        self.click(a.menu_geo["opts"]["ok"])
+        self.assertEqual(sorted(pk.load(self.dir / "two.csp").songs), ["two_Main_Theme", "two_Second_Theme"])
+
+    def test_famistudio_project_that_is_too_new_says_so(self):
+        import struct
+        from chipsynth.tests.test_famistudio_binary import tiny_fms
+        data = bytearray(tiny_fms())
+        data[4:8] = struct.pack("<i", 40)
+        a = self.a
+        self.assertFalse(a.import_file(self.write("new.fms", bytes(data))))
+        self.assertIn("newer", a.message)
+        self.assertFalse(a.import_file(self.write("junk.fms", b"hello hello hello"), "famistudio_fms"))
+        self.assertIn("not a FamiStudio", a.message)
+
+    def test_the_import_menu_lists_the_fms_project(self):
+        self.open_menu()
+        self.click(self.row("Import"))
+        self.row("FamiStudio project", sub=True)
+
     def test_famistudio_single_song_imports_without_a_dialog(self):
         a = self.a
         a.import_begin(self.write("one.txt", TINY))
@@ -492,6 +534,13 @@ class ImportTests(Base):
         self.assertEqual(a.overlay, "fileopts")
         a.frame([key(pygame.K_ESCAPE)])
         a.frame([pygame.event.Event(pygame.DROPFILE, file=str(self.write("d.txt", TINY)))])
+        self.assertEqual(a.source, "")
+        self.assertNotEqual(a.label, "Test")
+
+    def test_dropping_a_fms_project_imports_it(self):
+        from chipsynth.tests.test_famistudio_binary import tiny_fms
+        a = self.a
+        a.frame([pygame.event.Event(pygame.DROPFILE, file=str(self.write("d.fms", tiny_fms())))])
         self.assertEqual(a.source, "")
         self.assertNotEqual(a.label, "Test")
 

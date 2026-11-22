@@ -265,8 +265,7 @@ Export (WAV, MIDI, MML, FamiStudio text, package copy), the same writers and imp
 (Save, Don't save, Cancel) before anything replaces the open song.
 
 Not built: simulating table-driven instruments with short per-frame notes (decision 2 above; the fit and the report come first);
-reading a version check (the importer reads any 4.x file and ignores `Version`, where FamiStudio itself refuses other versions);
-the FamiStudio binary `.fms` (import only, if at all); expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM; the importer skips their channels and reports them).
+expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM; the importer skips their channels and reports them).
 
 **GoatTracker `.sng` import: slices 1 and 2 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
 errors), the three voices as V1-V3, notes, rests, key-offs, order list repeat and transpose, the restart position as the loop point, tempo changes,
@@ -291,3 +290,18 @@ Fixed in slice 2: the song's bpm was multiplied by the multispeed, which played 
 Instrument names are made into identifiers (anything but letters, digits and `_` becomes `_`).
 Not built: a writer (GoatTracker `.sng` export); the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
 the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
+
+**FamiStudio `.fms` project import: built.** `chipsynth/formats/famistudio_binary.py` reads the binary project into the text importer's own `Project` model and
+`famistudio_text.load_project` converts it, so the mapping, the envelope fits and the Report are the same code. Written from `ProjectFile.cs`, `Compression.cs`,
+`ProjectBuffer.cs` and the `Serialize` methods of `Project`, `Song`, `Channel`, `Pattern`, `Note`, `Instrument`, `Envelope`, `Arpeggio` and `DPCMSample` (MIT, read only, on the
+author's machine from the current master, project format version 19). The header is `FMS!` (u32 `0x21534D46`), an i32 format version, an i32 payload size and a raw deflate
+stream (.NET `DeflateStream`, no zlib header); the payload is little endian, strings are UTF-16 with an i32 byte count, references are ids.
+Versions read: 15 to 19 (FamiStudio 4.1 to 4.5), every branch of those read from the source; older (before 4.1) and newer files are refused with the release and the way out (export FamiStudio
+text). `python -m chipsynth import PKG.csp FILE.fms` (by the `.fms` ending or by `FMS!`, with `--song`, `--region`, `--report`), and the composer's File > Import > FamiStudio project, drop and import dialog.
+Same as the text importer: the five NES channels, instruments, DPCM, tempo, loop point; expansion chips, pitch envelopes, effects and the rest are reported. Differences from text: the project export
+settings, folders, mixer settings and colours are read past and dropped; a DPCM sample whose source is a WAV, or DMC data with volume, rate, pitch, trim or envelope changes, is left out and
+reported (FamiStudio makes the final bytes with its own encoder when it opens the project; only the plain case is rebuilt, with its bit reverse and padding).
+Also built: the text importer checks `Version`. FamiStudio only opens text whose version starts with its own first three characters (4.5 now); chipsynth still reads any file but
+reports a version that is not 4.x as approximate and any other 4.x as a note that FamiStudio 4.5 would refuse it.
+Not verified: no real `.fms` file was read (none may be committed and the program cannot run here): the tests use files built by a writer made from the same reading of the source, so they check that
+reader and writer agree, not that a real project reads. Versions 15 to 18 differ from 19 only in gated fields, checked the same way.
