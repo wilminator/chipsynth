@@ -367,7 +367,10 @@ def tracker(app):
     pygame.draw.rect(surf, th["panel"], (g["x"], g["y"], g["w"], g["head"]))
     pygame.draw.line(surf, th["line"], (g["x"], g["y"] + g["head"] - 1), (g["x"] + g["w"], g["y"] + g["head"] - 1))
     text(surf, f.small, "%s rows" % M.SNAPS[app.snap_i][0], (g["x"] + 6, g["y"] + g["head"] * 3 // 10), th["dim"], "ml")
-    text(surf, f.small, "Octave %d" % cur.octave, (g["x"] + 6, g["y"] + g["head"] * 7 // 10), th["accent"], "ml")
+    if cur.vol_entry is not None:
+        text(surf, f.small, "Volume %s_" % cur.vol_entry, (g["x"] + 6, g["y"] + g["head"] * 7 // 10), th["accent"], "ml")
+    else:
+        text(surf, f.small, "Octave %d" % cur.octave, (g["x"] + 6, g["y"] + g["head"] * 7 // 10), th["accent"], "ml")
     if ui.hover((g["x"], g["y"], g["rn"], g["head"])):
         ui.tip = "The octave the piano keys type in: - / + or Shift+Up / Shift+Down"
     left = cur.left
@@ -380,6 +383,7 @@ def tracker(app):
     first, count = cur.top, g["visible"]
     cells = [TR.column_cells(rl, c, rt, first, count) for c in range(rl.lanes)]
     extras = [TR.row_notes(rl, c, rt, first, count) for c in range(rl.lanes)]
+    defaults = [TR.voice_default(rl, c) for c in range(rl.lanes)]      # a note with its voice's usual volume is drawn dim
     tick = app.playhead()
     play_row = None if tick is None else int(tick // rt)
     bt = rl.bar_ticks
@@ -416,7 +420,7 @@ def tracker(app):
                     mark = EFFECT_MARK.get(nt.fx, "")
                     text(surf, f.mono, label, (cx + 6, ry + g["row_h"] // 2), col, "ml", g["cw"] // 3)
                     text(surf, f.mono, "v%d" % nt.vol, (cx + g["cw"] * 5 // 9, ry + g["row_h"] // 2),
-                         mix(th["dim"], bg, 0.15 if nt.vol != 15 else 0.6), "ml", g["cw"] // 4)
+                         mix(th["dim"], bg, 0.15 if nt.vol != defaults[c] else 0.6), "ml", g["cw"] // 4)
                     if mark:
                         text(surf, f.mono, mark, (cx + g["cw"] - 6, ry + g["row_h"] // 2), th["accent"], "mr", g["cw"] // 5)
     for c in range(1, len(shown) + 1):
@@ -440,7 +444,7 @@ def tracker(app):
             ui.tip = "Tracks off screen: drag, or Shift+wheel, or the left / right arrows"
     if ui.hover((g["x"], g["rows_y"], g["w"], g["h"] - g["head"])):
         ui.tip = ("Type notes on the keys z s x d c v ... (piano layout), - / + octave, Delete erases, Enter places a drum sample, "
-                  ", / . volume (Shift: bigger steps), ; effect")
+                  ", / . volume (Shift: bigger steps), / then digits types a volume, ; effect")
     surf.set_clip(None)
 
 
@@ -1466,6 +1470,12 @@ def report_overlay(app):
 
 
 MOOD_LABEL = {"": "any"}
+NEW_OPTION_TIP = {
+    "echo": "A tempo-synced echo (ping-pong in the roomy kinds)", "reverb": "A room around the lead and arpeggio",
+    "filter": "A low-pass filter on the voices that suit it, swept in some kinds", "vibrato": "Vibrato on the lead's held notes",
+    "slide": "Portamento into some of the leaps", "sweep": "Pulse-width sweeps on a pulse arpeggio, lead or pad",
+    "degrees": "Write the notes as scale degrees under a key line (the same song, easy to transpose)",
+    "dac": "Drums as samples on D1 / D2", "dac-bass": "The bass as pitched samples on D2", "voice": "A rare shouted accent on D1"}
 
 
 def new_overlay(app):
@@ -1473,7 +1483,7 @@ def new_overlay(app):
     surf, th, f, ui, s = app.screen, app.th, app.fonts, app.ui, app.scale
     sw, sh = surf.get_size()
     d = app.newdlg
-    r = modal(app, min(sw - 40, int(460 * s)), int(f.line * 11.8))
+    r = modal(app, min(sw - 40, int(460 * s)), int(f.line * 16.6))
     pad = int(16 * s)
     text(surf, f.bold, "New song from the generator", (r.x + pad, r.y + pad), th["text"])
     lw = int(70 * s)
@@ -1521,7 +1531,22 @@ def new_overlay(app):
         app.new_seed_random()
         d["focus"] = "seed"
     y += rh + int(f.line * 0.5)
-    text(surf, f.small, "The same kind, mood and seed always make the same tune.", (r.x + pad, y), th["dim"], "tl", r.w - 2 * pad)
+    # the option words: toggles in two rows of five (effects, degrees, then the DAC parts)
+    opts = {}
+    gap = 4
+    ow = (r.w - 2 * pad - 4 * gap) // 5
+    for i, word in enumerate(app.NEW_OPTIONS):
+        rect = pygame.Rect(r.x + pad + (i % 5) * (ow + gap), y + (i // 5) * (rh + gap), ow, rh)
+        opts[word] = rect
+        if open_key is not None:
+            ui.click, ui.pos = None, (-1, -1)
+        if ui.button(surf, th, f, rect, word, NEW_OPTION_TIP[word], on=word in d["opts"]):
+            app.new_toggle(word)
+        if open_key is not None:
+            ui.click, ui.pos = held
+    app.geo["new"]["opts"] = opts
+    y += 2 * (rh + gap) + int(f.line * 0.3)
+    text(surf, f.small, "The same kind, mood, seed and options always make the same tune.", (r.x + pad, y), th["dim"], "tl", r.w - 2 * pad)
     bw = int(90 * s)
     by = r.bottom - pad - int(f.line * 1.3)
     if ui.button(surf, th, f, (r.right - pad - bw, by, bw, int(f.line * 1.3)), "OK", "Enter"):
@@ -1549,6 +1574,7 @@ HELP = (
     ("Arrows", "scroll (Shift for bigger steps); in Tracks, Up / Down pick the track above / below"), ("Middle drag", "pan"),
     ("Tracker keys", "z s x d c v ... and q 2 w 3 e ... are a piano; - / + octave"),
     ("Tracker , / .", "volume of the note at the cursor, down / up (Shift: by 4)"),
+    ("Tracker /", "type the volume of the note at the cursor: 0-9, or 1 then 0-5; Enter sets, Esc cancels"),
     ("Tracker ; / :", "effect of the note at the cursor: next / previous (~ vibrato, / slide, ^ arpeggio)"),
     ("Tab", "switch between Tracks, the piano roll and the tracker"),
     ("Click ruler", "set where Play starts"), ("Click a note", "select it (the inspector shows it)"),
@@ -1561,7 +1587,7 @@ HELP = (
     ("Q", "snap the selected notes to the grid"), ("Ctrl+E", "export a MIDI file (drop a .mid to import one)"), ("Drag a note", "move it; drag its right end to resize"),
     ("File / F10", "the File menu: New, Open, Save, Import, Export"),
     ("Menu keys", "Up / Down pick, Right / Left open or close Import / Export, Enter runs"),
-    ("Drop .sng/.swm/.txt", "import a GoatTracker or SID-Wizard song / FamiStudio text"),
+    ("Drop .sng/.sf2/.swm/.txt/.fms", "import a GoatTracker / SID Factory II / SID-Wizard song / FamiStudio text or project"),
     ("Drum lanes", "click D1 / D2 to place the picked sample; drag to move"),
     ("Drop a .wav", "import it as a drum sample"),
     ("Delete", "erase the selected note or drum hit"), ("Arrows (note)", "with a note picked: nudge it (Shift = octave)"),
