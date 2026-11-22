@@ -501,8 +501,8 @@ class Composer(FileMenu):
         elif t == pygame.KEYDOWN:
             self.on_key(e)
         elif t == getattr(pygame, "DROPFILE", -1):
-            if str(e.file).lower().endswith((".wav", ".sng", ".sf2", ".txt", ".fms")):
-                self.import_begin(e.file)                  # WAV / GoatTracker / SID Factory II / FamiStudio: asks for the options it needs
+            if str(e.file).lower().endswith((".wav", ".sng", ".sf2", ".swm", ".txt", ".fms")):
+                self.import_begin(e.file)                  # WAV / GoatTracker / SID Factory II / SID-Wizard / FamiStudio: asks for the options it needs
             else:
                 self.open_path(e.file)
 
