@@ -12,7 +12,8 @@ It builds on the command line from PR #1 (`import`, `export-song`, `components.p
 | **GoatTracker 2** (`.sng`) | **Do second.** Import and export, about 3 slices | the simple, de facto interchange format of the SID scene (SID Factory II imports it); GPL-2+ |
 | SID Factory II (`.sf2`) | Skip a native format; reach it through GoatTracker | a driver-defined C64 memory image, no spec found; it already imports GoatTracker `.sng` |
 | Furnace (`.fur`) | Third, optional, large | one format covers SID *and* the NES (and more); actively developed; but version-gated, with per-chip instrument types |
-| CheeseCutter (`.ct`), SID-Wizard (`.swm`) | Skip for now | no format spec found; SID-Wizard is in maintenance mode; both are reachable through SID Factory II / their own exporters |
+| CheeseCutter (`.ct`) | Skip for now | no format spec found; reachable through SID Factory II |
+| **SID-Wizard** (`.swm`) | **Import built** (section 4) | the spec ships in the release (`SWM-spec.src`) and the source is WTF-licensed; the player source settles the rest |
 
 Nothing here maps exactly. chipsynth's `Instrument` is a static recipe (waveform, ADSR, vibrato, arpeggio, pulse sweep,
 filter sweep); trackers drive instruments with *per-frame programs* (envelopes, tables). Every import is an approximation
@@ -36,8 +37,7 @@ Checked against the projects' own pages or source (links in section 8):
 - GoatTracker's `.sng` byte layout. Section 4 is from the constants a third-party converter publishes (`GTS5` header, 25-byte instruments,
   63 instruments, 208 patterns, 32 subtunes, 255-row tables, 128 rows per pattern) and from memory of the format. **Slice 0 for
   GoatTracker is reading `gsong.c` / `gcommon.h` and fixing this section.**
-- SID Factory II's license (no LICENSE file seen on the repository page; one article says "open source"), SID-Wizard's license
-  ("open source" informally, source shipped in the release), and any `.ct` / `.swm` / `.sf2` layout.
+- SID Factory II's license (no LICENSE file seen on the repository page; one article says "open source"), and any `.ct` / `.sf2` layout. (SID-Wizard: found later, section 4.)
 - Whether FamiStudio's MIDI file code reads, writes or both.
 - The exact compression FamiStudio uses for the `.fms` payload (it is .NET `System.IO.Compression` "Optimal"; probably deflate/zlib).
 
@@ -119,7 +119,7 @@ envelopes. That is exact up to the 60 Hz sampling.
 | editor | license | latest seen | format | verdict |
 |---|---|---|---|---|
 | **SID Factory II** | unverified (open source) | build 20260314; "next release" notes pending | `.sf2`; imports GoatTracker, CheeseCutter, MOD | active; reach via GoatTracker import |
-| **SID-Wizard** | unverified (source in the release) | 1.97, 2026-06-24 | `.swm` ("SWM1"), no spec found | maintained; author says feature-complete |
+| **SID-Wizard** | WTF (source README, verified 2026-11-22) | 1.97, 2026-06-24 | `.swm` ("SWM1"), spec in the source (`SWM-spec.src`) | maintained; author says feature-complete; **import built** |
 | **Furnace** | GPL-2+/3 | v0.6.8.3 | `.fur`, documented | very active; C64 SID among its many chips |
 | **CheeseCutter** | GPL-2.0 | SDL2 port merged 2026-03 | `.ct`, no spec found | alive |
 | **GoatTracker 2** | GPL-2+ | 2.77 (Debian, copyright to 2025); Stereo variant | `.sng` "GTS5" | stable; the format others import |
@@ -158,6 +158,40 @@ a speedtable for `vib`; quantize note starts to frames (speed = frames per row f
 
 Reaching SID Factory II: its importer reads `.sng`, so a good `.sng` exporter is also a path into SF2, and from SF2 into a playable `.sid`/PRG.
 `.sid` files are a different thing (6502 player code + data); importing one would need a 6502 + SID emulator and register-trace to notes. Out of scope.
+
+### SID-Wizard `.swm` ("SWM1")
+
+Read 2026-11-22. **Licences:** SID-Wizard 1.97's own README (the `anarkiwi/sid-wizard` repository carries the 1.97 sources under `native/`, plus a Vessel MIDI port) says: "let's declare SID-Wizard as a WTF-licensed tool, so you can do WTF you want with it" (Hermit Software). `pysidwizard` 0.7.0
+(`anarkiwi/pysidwizard`, Josh Bailey), a separate from-first-principles reader / writer / player, is Apache-2.0. Both were read only; nothing was copied.
+
+**What was read:** `native/sources/SWM-spec.src` (Hermit's own description of the file: header offsets, instrument layout, note and effect values),
+`SWMconvert.c` (`ProcessSWMver1` is a reader written by the format's author; `GenerateMIDI` shows how rows, the orderlist, transpose and tempo play),
+`include/player.asm` (the 6502 player: the sequencer, packed empty rows, the tempo counter, the wave/arpeggio and pulse tables), and from `pysidwizard`
+`docs/format.md`, `constants.py`, `reader.py`, `model.py` and the grammar. Where two of them describe the same thing they agree (header, the back-to-front layout,
+pattern packing, orderlist commands, instrument layout, note numbering); the places only the player settles are noted below.
+
+**Layout** (all bytes; a `.swm` is a C64 PRG, so two load-address bytes come first; a `.P00` has a 26-byte `C64File` header before those; a bare module is also read):
+
+| part | content |
+|---|---|
+| header, 64 bytes | `SWM1`; 4 frame speed (1-8); 11 default pattern length; 12 sequence count; 13 pattern count; 14 instrument count; 15 chord table size; 16 tempo table size; 19 driver; 20 tuning (0 = 440 Hz, 1 = 432 Hz, 2 = just intonation for C); 24-63 author text; the rest is obsolete editor settings |
+| sequences | one orderlist per channel, three per subtune; each is its bytes then one size byte |
+| patterns | each is its packed rows, then a size byte (unpacked bytes + 1 for the `$FF` end) and a row-count byte |
+| instruments | each is its data (without the last `$FF`), then a size byte, then an 8-character name |
+| chord table, tempo table | as many bytes as the header says |
+| subtune tempos | two bytes (left, right) per subtune: the last bytes of the file |
+
+So the file is read from its end. Orderlist bytes: `$00-$7F` pattern (1-based), `$80-$9F` transpose (byte - `$90`), `$A0-$AF` main volume, `$B0-$EF` this channel's tempo (byte - `$B0`),
+`$F0-$FD` no-op, `$FE` end, `$FF` then a position (below `$80`: loop to that byte of this orderlist; `$80` and up: jump to another subtune). Pattern rows: a note byte, whose
+bit 7 says an instrument byte follows, whose bit 7 says an effect byte follows, which takes a value byte when it is below `$20`; notes `$01-$5F` (1 is C-0), `$7E` gate off, `$60-$6F` vibrato amplitude,
+`$78-$7F` other note effects; a byte `$70-$77` after a `$00` stands for 2-9 more `$00` rows. Instruments: 16 header bytes (3 attack/decay, 4 sustain/release, 5 vibrato,
+7 arpeggio speed, 8 default chord, 9 octave shift, 10 and 11 the pulse and filter table offsets), then the wave/arpeggio, pulse and filter tables of 3-byte rows, each ending in `$FF`.
+A tempo is the number of player calls a row lasts; a tempo list repeats (a funk tempo is two entries). The player is called `frame speed` times per video frame.
+
+**How it was checked:** Hermit's own converter (`SWMconvert.c`, compiled locally, not committed) wrote SWM files from a MIDI file and the importer read them back to the same notes; its
+SWM-to-MIDI export was then compared note by note (start tick and pitch, all three channels) with the importer's output for hand-built files with transposes, an orderlist tempo, a track-tempo
+pattern effect, a subtune tempo, an instrument octave shift and packed gaps: identical. 6000 randomly damaged files gave errors, never a crash or a hang. **Not checked:** a real song saved by the editor
+(none was to hand), the result by ear, and everything the notes in section 9 list.
 
 ### Furnace `.fur`
 
@@ -218,7 +252,7 @@ chipsynth/formats/
    approximately. Chip details are to be verified before building.
 6. **Import with more than four voices.** Every source channel is kept as a named part. V1-V4 and D1-D2 are built from the most important parts
    (ranked, gaps filled), with a report and a `--voices` override.
-7. **Licenses.** SF2 and SID-Wizard licenses are unknown: ask the authors before depending on either. CheeseCutter is GPL-2.0 only: no code is copied.
+7. **Licenses.** The SF2 license is unknown: ask the author before depending on it. SID-Wizard's own README declares it WTF-licensed and `pysidwizard` is Apache-2.0 (both read only, section 4). CheeseCutter is GPL-2.0 only: no code is copied.
 
 Related design notes (not part of this work): an application-defined voice/DAC count, and the vertically scrollable track list (composer Tracks view).
 
@@ -228,7 +262,7 @@ Related design notes (not part of this work): an application-defined voice/DAC c
 - Furnace: https://github.com/tildearrow/furnace (README; `papers/format.md`; releases)
 - CheeseCutter: https://github.com/theyamo/CheeseCutter (GPL-2.0); `ct2util(1)` man page on manpages.debian.org
 - SID Factory II: https://github.com/Chordian/sidfactory2 and https://blog.chordian.net/sf2/
-- SID-Wizard: https://sourceforge.net/projects/sid-wizard/ ; CSDb release pages for 1.93-1.97 (csdb.dk), theoasisbbs.com coverage of 1.93 and 1.95
+- SID-Wizard: https://sourceforge.net/projects/sid-wizard/ ; CSDb release pages for 1.93-1.97 (csdb.dk), theoasisbbs.com coverage of 1.93 and 1.95; the 1.97 sources (`native/sources/SWM-spec.src`, `SWMconvert.c`, `include/player.asm`, README) in https://github.com/anarkiwi/sid-wizard ; https://github.com/anarkiwi/pysidwizard (Apache-2.0; `docs/format.md`, `src/pysidwizard/`)
 - GoatTracker: Debian package `goattracker` 2.77+ds-1 and its copyright file; ChiptuneSAK's `goat_tracker` module (published constants for `GTS5`)
 
 ## 9. Status
@@ -284,5 +318,21 @@ Vibrato is a triangle swing in the player and a sine in chipsynth, so it is alwa
 
 Fixed in slice 2: the song's bpm was multiplied by the multispeed, which played a multispeed song at N times its speed; it follows the video rate only (125 pal, 150 ntsc).
 Instrument names are made into identifiers (anything but letters, digits and `_` becomes `_`).
-Not built: a writer (GoatTracker `.sng` export); the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
+Not built: a writer (GoatTracker `.sng` export); the rest of the pattern commands and the filter tables; SID Factory II (`.sf2`) and Furnace (`.fur`) importers (SID-Wizard: below). Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
 the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
+
+**SID-Wizard `.swm` import: built.** `chipsynth/formats/sidwizard.py` (layout and sources in section 4): the reader (the PRG, bare and `.P00` forms; truncation, bad table pointers and counts that do not add up are errors), the three
+SID voices as V1-V3, notes, rests and gate-offs (`$7E`), the orderlists (patterns, transpose, a channel's tempo, the loop position), the subtune tempo (single or funk) and the tempo pattern effects `$10`, `$11`, `$13`, `$14`,
+the frame speed from the header (a player call is 4/N ticks; exact for N = 1, 2, 4), several subtunes, and per instrument the ADSR, the first waveform, the starting pulse width, the octave shift, a wave table that loops over
+relative notes (-> `arp`, `arprate`, fitted as for GoatTracker) and a pulse table that sweeps (-> `pws_from`, `pws_to`, `pws_rate`, only on a pulse wave). The channels loop on their own in SID-Wizard but chipsynth has one loop point: the song
+is unrolled to the latest loop target and the least common multiple of the channels' loop lengths (the longest one if that passes twenty minutes), and says so.
+The command line (a `.swm` is found by its ending or by `SWM1` at the start; a single song is named for the file):
+
+    python -m chipsynth import PKG.csp FILE.swm [--region pal|ntsc] [--song N] [--report FILE]
+
+and the composer's File > Import > SID-Wizard (and dropping a `.swm`), which asks the region and the subtune. `--multispeed` is for GoatTracker only: a `.swm` records its own frame speed. The file records no PAL or NTSC either, so `--region` defaults to pal.
+Reported, not carried over: instrument vibrato, filter tables, wave tables that play chords, absolute notes, detune, or rows once before settling, pulse tables that zigzag or change width before setting one, the tempo table's programs
+(`$12`, `$15`) and every other pattern effect and small effect by name (slides, portamento, vibrato, set waveform, set sustain and so on), note-column vibrato, sync, ring, gate on, the orderlist's main volume, and a jump to another subtune;
+legato is played as a new note (said as approximate); a tuning other than 440 Hz is played at 440 Hz. A song with no key-off is not made to stop: the last note holds, as in the player.
+**Not verified:** no song saved by the real editor was read (the layout was checked against Hermit's own converter, section 4), nothing was compared with SID-Wizard by ear; that a tempo effect changes the row it is on (read from `player.asm`), how tempo programs are numbered (so effects `$12` and `$15` are reported, not played), that
+a repeat row (`$01-$0F` in the wave table) lasts one call more than its number (read from the player), and the 2-call delay at the start of a note (not modelled). Table programs were classified from the player source and hand-built files, not from real songs.

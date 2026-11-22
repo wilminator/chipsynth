@@ -21,6 +21,7 @@ from chipsynth.composer.prefs import Prefs
 from chipsynth.formats import famistudio_text as fam
 from chipsynth.song import Song
 from chipsynth.tests.test_goattracker_import import C4, sng, pat, gt
+from chipsynth.tests import test_sidwizard_import as swt
 
 DATA = Path(__file__).parent / "data" / "famistudio"
 TINY = (DATA / "tiny.txt").read_text()
@@ -655,6 +656,72 @@ class ReportOverlayTests(Base):
         a.show_report("Facts", ["note: written by FamiStudio 4.5.3"], "ok")
         self.assertIsNone(a.overlay)
         self.assertEqual(a.last_report[0], "Facts")
+
+
+class SidWizardImportTests(Base):
+    """File > Import > SID-Wizard (.swm): the same flow as GoatTracker, minus multispeed (the file records its own)."""
+
+    def swm(self, name="tune.swm", rows=None, **kw):
+        return self.write(name, swt.one(rows or [(swt.C4, 1), (swt.OFF,)], **kw))
+
+    def test_options_ask_for_region_and_subtune_only(self):
+        a = self.a
+        self.assertTrue(a.import_begin(self.swm()))
+        self.assertEqual(a.overlay, "fileopts")
+        a.frame()
+        self.assertEqual([r["key"] for r in a.fileopts["rows"]], ["region", "song"])
+        a.frame([key(pygame.K_RIGHT)])                              # PAL -> NTSC
+        self.click(a.menu_geo["opts"]["ok"])
+        self.assertIsNone(a.overlay)
+        self.assertEqual(a.tune.nvoices, 3)
+        self.assertEqual(a.song.bpm, 150)
+
+    def test_the_report_is_shown_for_what_was_left_out(self):
+        a = self.a
+        self.assertTrue(a.import_file(self.swm(rows=[(swt.C4, 1, 0x08, 0x35), (swt.OFF,)])))
+        self.assertTrue(any(x.startswith("left out:") and "set vibrato" in x for x in a.last_report[1]), a.last_report[1])
+        self.assertEqual(a.overlay, "report")
+        self.assertIn("SID-Wizard", a.last_report[0])
+
+    def test_the_import_menu_row_and_dropping_a_swm(self):
+        a = self.a
+        asked = []
+        p = self.swm("viamenu.swm")
+        a.choose_path = lambda save, title, pattern, *rest, **kw: asked.append((save, title, pattern)) or str(p)
+        self.open_menu()
+        self.click(self.row("Import"))
+        self.click(self.row("SID-Wizard", sub=True))
+        self.assertEqual(asked, [(False, "Import SID-Wizard song", "*.swm")])
+        self.assertEqual(a.overlay, "fileopts")
+        a.frame([key(pygame.K_ESCAPE)])
+        a.frame([pygame.event.Event(pygame.DROPFILE, file=str(self.swm("dropped.swm")))])
+        self.assertEqual(a.overlay, "fileopts")
+
+    def test_two_subtunes_go_into_a_package_beside_the_file(self):
+        a = self.a
+        data = swt.swm([[1, 0xFF, 0], [0xFE], [0xFE]] * 2, [swt.pattern((swt.C4, 1), (swt.OFF,))], [swt.instrument()], tempos=[(0x86, 0x86)] * 2)
+        p = self.write("two.swm", data)
+        self.assertTrue(a.import_file(p))
+        self.assertTrue((self.dir / "two.csp").exists())
+        from chipsynth import package as pk
+        self.assertEqual(sorted(pk.load(self.dir / "two.csp").songs), ["two_1", "two_2"])
+
+    def test_a_bad_file_is_a_message_not_a_crash(self):
+        a = self.a
+        self.assertFalse(a.import_file(self.write("bad.swm", b"\0\0nope"), "sidwizard"))
+        self.assertIn("SID-Wizard", a.message)
+        self.assertEqual(a.label, "Test")
+
+    def test_fileops_names_the_subtunes_without_a_window(self):
+        from chipsynth.composer import fileops as fo
+        p = self.swm()
+        self.assertEqual(fo.kind_of(p), "sidwizard")
+        self.assertEqual(fo.song_names("sidwizard", p), ["subtune 1"])
+        loaded = fo.read_import("sidwizard", p, region="ntsc")
+        self.assertEqual(loaded.songs[0][0], "tune")
+        self.assertEqual(loaded.songs[0][1].bpm, 150)
+        with self.assertRaises(fo.FileOpError):
+            fo.song_names("sidwizard", self.write("x.swm", b"nope"))
 
 
 if __name__ == "__main__":

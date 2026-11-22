@@ -9,7 +9,7 @@
   build TEXT [-o PKG.csp]         assemble a package from a dump
   import PKG.csp FILE.mml ...     add songs (song id = file name, with `_` for anything an id may not hold) to a package, creating it if needed
                                   (FILE.mid works too; FILE.txt from FamiStudio's File > Export > FamiStudio Text works too;
-                                  so does a GoatTracker 2 FILE.sng)
+                                  so does a GoatTracker 2 FILE.sng, and a SID-Wizard FILE.swm)
                                     --id NAME     the song id, when there is one file
                                     --shared      the files are libraries ([instr] [fx] [key] [sample]): their
                                                   parts are added to the package for all its songs
@@ -19,7 +19,9 @@
                                     --voices N    (MIDI) make songs of N voices; the others' notes fill the gaps
                                     --song NAME   (FamiStudio) only this song (a name or a number); --region ntsc|pal
                                                   (GoatTracker: --song N is the subtune, --region pal|ntsc defaults to pal,
-                                                  --multispeed 1|2|4, --report FILE; the file records none of these)
+                                                  --multispeed 1|2|4, --report FILE; the file records none of these;
+                                                  SID-Wizard: --song N is the subtune, --region pal|ntsc defaults to pal,
+                                                  --report FILE; the file records its own frame speed)
   export PKG.csp [options]        components as MML: each song as ID.mml, the rest in lib/PACKAGE.mml, DPCM samples
                                   in samples/NAME.dpcm (a game's music folder).  Without --type: songs and the
                                   package's shared parts.
@@ -45,7 +47,7 @@ import sys
 from pathlib import Path
 
 from . import components as comp, exporter, mml, midi, package as pk, packagetext
-from .formats import goattracker
+from .formats import goattracker, sidwizard
 from .packageset import PackageSet
 from .song import Song
 
@@ -168,12 +170,12 @@ def import_cmd(args):
                    help="(MIDI) make songs of N voices: the most important parts stay and the others' notes fill their gaps "
                         "(default: a voice for every part, up to 16)")
     p.add_argument("--song", metavar="NAME", help="(FamiStudio) import only this song, by name or number; (GoatTracker) only this "
-                                                  "subtune, by number (default: every song)")
+                                                  "subtune, by number (default: every song); (SID-Wizard) only this subtune")
     p.add_argument("--region", choices=("ntsc", "pal"), help="(FamiStudio) the timing to use (default: what the file says); "
-                                                             "(GoatTracker) 50 Hz pal or 60 Hz ntsc (default pal: the file does not say)")
+                                                             "(GoatTracker, SID-Wizard) 50 Hz pal or 60 Hz ntsc (default pal: the file does not say)")
     p.add_argument("--multispeed", type=int, choices=(1, 2, 4), default=1,
                    help="(GoatTracker) frames the player runs for each video frame (default 1: the file does not say)")
-    p.add_argument("--report", metavar="FILE", help="(FamiStudio, GoatTracker) also write what was changed or left out, as JSON")
+    p.add_argument("--report", metavar="FILE", help="(FamiStudio, GoatTracker, SID-Wizard) also write what was changed or left out, as JSON")
     add_library_options(p)
     a = p.parse_args(args)
     if a.id and len(a.files) != 1:
@@ -195,6 +197,9 @@ def import_cmd(args):
         if Path(f).suffix.lower() == ".sng" or goattracker.looks_like(_head(f)):
             import_goattracker(a, pkg, f, lib)
             continue
+        if Path(f).suffix.lower() == ".swm" or sidwizard.looks_like(_head(f)):
+            import_sidwizard(a, pkg, f, lib)
+            continue
         sid = a.id or pk.Package.safe_id(Path(f).stem)
         if sid in pkg.songs and a.no_replace:
             raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
@@ -210,9 +215,9 @@ def import_cmd(args):
 
 
 def _head(f):
-    """The first bytes of a file (to tell a GoatTracker song from MML by its start)."""
+    """The first bytes of a file (to tell a GoatTracker or SID-Wizard song from MML by its start)."""
     with open(f, "rb") as fh:
-        return fh.read(4)
+        return fh.read(32)
 
 
 def import_goattracker(a, pkg, f, lib):
@@ -232,6 +237,38 @@ def import_goattracker(a, pkg, f, lib):
     if a.id and len(res.songs) != 1:
         raise pk.PackageError("--id needs one song: the file has %d subtunes (pick one with --song N)" % len(res.songs))
     stem = pk.Package.safe_id(Path(f).stem)
+    for n, imp in enumerate(res.songs, 1):
+        number = sub or n
+        sid = a.id or (stem if len(res.songs) == 1 else "%s_%d" % (stem, number))
+        if sid in pkg.songs and a.no_replace:
+            raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
+        verb = "replaced" if sid in pkg.songs else "added"
+        pkg.add_song(sid, imp.song, lib)
+        print("%s song '%s' from %s (%s)" % (verb, sid, f, imp.name))
+    for line in res.report.lines():
+        print("  " + line)
+    if a.report:
+        import json
+        Path(a.report).write_text(json.dumps(res.report.as_dict(), indent=2), encoding="utf-8")
+
+
+def import_sidwizard(a, pkg, f, lib):
+    data = Path(f).read_bytes()
+    if not sidwizard.looks_like(data):
+        raise pk.PackageError("%s is not a SID-Wizard song (it should hold SWM1 at its start)" % f)
+    sub = None
+    if a.song is not None:
+        try:
+            sub = int(a.song)
+        except ValueError:
+            raise pk.PackageError("--song for a SID-Wizard file is the subtune number (got %r)" % a.song)
+    stem = pk.Package.safe_id(Path(f).stem)
+    try:
+        res = sidwizard.load(data, region=a.region or "pal", subtune=sub, name=Path(f).stem)
+    except sidwizard.SidWizardError as e:
+        raise pk.PackageError("%s: %s" % (f, e))
+    if a.id and len(res.songs) != 1:
+        raise pk.PackageError("--id needs one song: the file has %d subtunes (pick one with --song N)" % len(res.songs))
     for n, imp in enumerate(res.songs, 1):
         number = sub or n
         sid = a.id or (stem if len(res.songs) == 1 else "%s_%d" % (stem, number))

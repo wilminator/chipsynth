@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from chipsynth import package as pk
-from chipsynth.formats import goattracker, famistudio_text as fam
+from chipsynth.formats import goattracker, sidwizard, famistudio_text as fam
 from chipsynth.formats.report import Report
 
 # kind -> (menu label, dialog title, file patterns, suffixes it is recognised by)
@@ -21,6 +21,7 @@ IMPORTS = {
     "mid": ("MIDI file...", "Import MIDI", "*.mid *.midi", (".mid", ".midi")),
     "famistudio": ("FamiStudio text (.txt)...", "Import FamiStudio text", "*.txt", (".txt",)),
     "goattracker": ("GoatTracker 2 (.sng)...", "Import GoatTracker song", "*.sng", (".sng",)),
+    "sidwizard": ("SID-Wizard (.swm)...", "Import SID-Wizard song", "*.swm", (".swm",)),
     "wav": ("WAV sample...", "Import a WAV as a drum sample", "*.wav", (".wav",)),
 }
 # format -> (menu label, dialog title, file pattern, default extension)
@@ -68,7 +69,7 @@ def _read_bytes(path):
 
 
 def song_names(kind, path):
-    """The names of the songs a FamiStudio or GoatTracker file holds (empty for other kinds), in file order."""
+    """The names of the songs a FamiStudio, GoatTracker or SID-Wizard file holds (empty for other kinds), in file order."""
     name = Path(path).name
     try:
         if kind == "famistudio":
@@ -82,14 +83,19 @@ def song_names(kind, path):
                 raise FileOpError("%s is not a GoatTracker song (it should start with GTS5)" % name)
             tune = goattracker.parse(data)
             return ["subtune %d" % (i + 1) for i in range(len(tune.orders))]
-    except (fam.FamiStudioError, goattracker.GoatTrackerError) as e:
+        if kind == "sidwizard":
+            data = _read_bytes(path)
+            if not sidwizard.looks_like(data):
+                raise FileOpError("%s is not a SID-Wizard song (it should hold SWM1 at its start)" % name)
+            return ["subtune %d" % (i + 1) for i in range(sidwizard.parse(data).subtunes)]
+    except (fam.FamiStudioError, goattracker.GoatTrackerError, sidwizard.SidWizardError) as e:
         raise FileOpError("%s: %s" % (name, e))
     return []
 
 
 def read_import(kind, path, lib=None, region=None, multispeed=1, song=None):
-    """A FamiStudio or GoatTracker file -> Loaded.  `song` picks one (FamiStudio: a name or number; GoatTracker: the
-    subtune number).  Song ids follow the command line: the file name, with _NAME (or _N) added when it holds several."""
+    """A FamiStudio, GoatTracker or SID-Wizard file -> Loaded.  `song` picks one (FamiStudio: a name or number;
+    GoatTracker, SID-Wizard: the subtune number).  Song ids follow the command line: the file name, with _NAME (or _N) added when it holds several."""
     name = Path(path).name
     stem = pk.Package.safe_id(Path(path).stem)
     out = Loaded(source=name)
@@ -113,9 +119,19 @@ def read_import(kind, path, lib=None, region=None, multispeed=1, song=None):
             for n, imp in enumerate(res.songs, 1):
                 sid = stem if len(res.songs) == 1 else "%s_%d" % (stem, sub or n)
                 out.songs.append((sid, imp.song, imp.samples, imp.name))
+        elif kind == "sidwizard":
+            data = _read_bytes(path)
+            if not sidwizard.looks_like(data):
+                raise FileOpError("%s is not a SID-Wizard song (it should hold SWM1 at its start)" % name)
+            sub = int(song) if song not in (None, "") else None
+            res = sidwizard.load(data, region=region or "pal", subtune=sub, name=Path(path).stem)
+            out.report = res.report
+            for n, imp in enumerate(res.songs, 1):
+                sid = stem if len(res.songs) == 1 else "%s_%d" % (stem, sub or n)
+                out.songs.append((sid, imp.song, imp.samples, imp.name))
         else:
             raise FileOpError("don't know how to import a '%s' file here" % kind)
-    except ValueError as e:                  # FamiStudioError and GoatTrackerError are ValueErrors; so is a bad subtune number
+    except ValueError as e:                  # the formats' errors are ValueErrors; so is a bad subtune number
         raise FileOpError("%s: %s" % (name, e))
     return out
 
