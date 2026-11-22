@@ -703,7 +703,7 @@ class _Parser:
                     v.tie = False
             elif c.isdigit() and v.key is not None:
                 i = self.degree(v, text, i, line, col0)
-            elif cl in LETTER and v.key is not None:
+            elif cl in LETTER and v.key is not None and not WORDS.match(text[i:]):      # (`arp 0,4,7` is a word, not an a)
                 err("letter notes are not used while a key is on: write degrees (1-9), or `key off`")
             elif c.isdigit():
                 m = re.match(r"(\d+)([a-gA-G])", text[i:])

@@ -115,6 +115,31 @@ In Python the menu's work is methods that take a path (no file dialog): `Compose
 multispeed=, song=, package=)`, `Composer.export_as(fmt, path, loops=, normalize=, part=, region=)` and `new_blank()`,
 over the window-free helpers in `composer/fileops.py`.
 
+### Effects and key changes on notes
+
+Pick one or more notes and press **E** (or the **Effects and key...** button at the foot of the inspector; in the tracker the
+button, since E is a piano key there). The dialog works like the File menu's options: Up / Down pick a row, Left / Right (or
+a click, or Space) change it, Enter applies, Esc cancels, Delete sets every effect to off.
+
+| row | does |
+|---|---|
+| Vibrato, Arpeggio (and its speed), Slide, Pulse sweep | set the effect on the picked notes only; the notes around them keep what they had. Notes that differ start on "keep each note's own"; a value that is not one of the presets is shown as "custom" and kept |
+| Key change | at the first picked note's start (the Play-from marker when nothing is picked): leave it, set the key below, remove the key change that starts there, or `key off`. Notes after it are rewritten as degrees of the key (letters after `key off`) so every one sounds as before. "applies to" is this voice or all voices |
+
+A note's effects show as a small mark at its right end (`~` vibrato, `/` slide, `^` arpeggio, `^m` a minor one, `w` pulse sweep;
+the status line spells them out when the pointer is on a note), and key changes show on the ruler and in the inspector's
+"Key changes" list (its **x** removes one). The effects and the key change of one OK are one undo step; if either is refused
+(a key inside a note or a pattern, a pattern that would have to be both letters and degrees: use Make unique first) nothing
+changes and the dialog comes back with the reason in the status line.
+
+In MML this is `vib`, `arp`, `arprate`, `slide` and `pws` words before the note, with the old value written again before the
+next note, and `key d minor` before the notes it governs. In Python it is the Editor's own calls, each one undo step:
+
+    ed.set_note_effects([(voice, start_tick), ...], vib=(5, 3), arp=(0, 4, 7), arprate=8, slide=12, pws=(25, 75, 6))
+    ed.set_key_at(tick, 2, "minor", voices=[0, 1])      # tonic 0-11, or None for `key off`; keep_pitch=False modulates
+    ed.remove_key_at(tick, voices=[0, 1])
+    ed.edit_notes(selection, effects={...}, key={...})  # both in one step: what the dialog does
+
 ## Command line (`python -m chipsynth`)
 
 A `.csp` package holds songs and what they share. Its *components* are of five types: `song`, `instrument`, `fx` (effect

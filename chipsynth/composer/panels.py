@@ -7,7 +7,6 @@ import pygame
 
 from chipsynth import musicgen
 from chipsynth.mml import SCALES
-from chipsynth.songedit import EFFECT_MARK
 from chipsynth.synth import ATTACK_MS, DECAY_MS, WAVES
 
 from . import layout as L, model as M, tracker as TR
@@ -413,7 +412,7 @@ def tracker(app):
                 if nt is None:
                     text(surf, f.mono, label, (cx + g["cw"] // 2, ry + g["row_h"] // 2), col, "mc", g["cw"] - 6)
                 else:                                   # note name, then its volume, then its effect mark
-                    mark = EFFECT_MARK.get(nt.fx, "")
+                    mark = nt.marks
                     text(surf, f.mono, label, (cx + 6, ry + g["row_h"] // 2), col, "ml", g["cw"] // 3)
                     text(surf, f.mono, "v%d" % nt.vol, (cx + g["cw"] * 5 // 9, ry + g["row_h"] // 2),
                          mix(th["dim"], bg, 0.15 if nt.vol != 15 else 0.6), "ml", g["cw"] // 4)
@@ -542,9 +541,9 @@ def draw_notes(app):
             if not dim and rect.w > f.small.size("C#4")[0] + 8 and v.row >= 13:
                 text(surf, f.small, M.pitch_name(n.pitch), (rect.x + 4, rect.centery), th["accent_text"]
                      if sum(col) > 380 else (255, 255, 255), "ml")
-            if n.fx != "none" and rect.w >= 8 and v.row >= 9:           # the note's effect, at its right end
-                text(surf, f.small, EFFECT_MARK[n.fx], (rect.right - 3, rect.centery),
-                     th["accent_text"] if sum(col) > 380 else (255, 255, 255), "mr")
+            if n.marks and rect.w >= 8 and v.row >= 9:                  # the note's effects, at its right end
+                text(surf, f.small, n.marks, (rect.right - 3, rect.centery),
+                     th["accent_text"] if sum(col) > 380 else (255, 255, 255), "mr", rect.w - 4)
 
 
 def draw_marquee(app):
@@ -635,12 +634,31 @@ def draw_ruler(app):
         if rx - 40 <= x <= rx + rw:
             pygame.draw.line(surf, th["voices"][1], (x, ry + rh * 0.3), (x, ry + rh))
             text(surf, f.small, "%d" % mb, (x + 3, ry + rh - 3), th["voices"][1], "bl")
+    tempo_at = {tk for tk, _ in app.ed.tempo_marks()} if app.ed else set()
+    for tick, label, _ in key_labels(app.ed, rl.names) if app.ed else ():
+        x = v.x_of(tick, rx)
+        if rx - 80 <= x <= rx + rw:
+            pygame.draw.line(surf, th["voices"][3], (x, ry + rh * 0.3), (x, ry + rh))
+            ox = (f.small.size("000")[0] + 6) if tick in tempo_at else 0
+            text(surf, f.small, label, (x + 3 + ox, ry + rh - 3), th["voices"][3], "bl")
     # where Play starts
     cx = v.x_of(app.cursor_tick, rx)
     if rx <= cx <= rx + rw and app.cursor_tick:
         pygame.draw.polygon(surf, th["accent"], [(cx - 5, ry + rh - 1), (cx + 5, ry + rh - 1), (cx, ry + rh - 9)])
     if app.ui.hover(app.geo["ruler"]):
         app.ui.tip = "Click to set where Play starts (and jump there while playing)"
+
+
+def key_labels(ed, names):
+    """[(tick, "D min", [voices])] for the ruler: the song's key changes, one label for the voices that share one."""
+    seen = {}
+    for m in ed.key_marks():
+        seen.setdefault((m.tick, m.tonic, m.scale), []).append(m.voice)
+    out = []
+    for (tick, tonic, scale), vs in sorted(seen.items(), key=lambda kv: kv[0][0]):
+        word = "key off" if tonic is None else "%s %s" % (M.NOTE_NAMES[tonic], scale)
+        out.append((tick, word if len(vs) == ed.song.voices else "%s (%s)" % (word, " ".join(names[v] for v in vs)), vs))
+    return out
 
 
 def draw_playhead(app):
@@ -834,6 +852,16 @@ def inspector(app):
         y += int(sq * 1.18)
     btn_row(("Change tempo at bar %d" % cur_bar, "Add a tempo change where Play starts", app.cursor_tick > 0,
              lambda: app.add_tempo_here()))
+    kl = key_labels(ed, rl.names)
+    if kl:
+        text(surf, f.small, "Key changes", (x + pad, y + 2), th["dim"])
+        y += int(f.line * 1.15)
+        for tick, label, vs in kl:
+            text(surf, f.ui, "bar %d: %s" % (tick // bar + 1, label), (x + pad + 6, y + sq // 2), th["text"], "ml", inner - sq - 8)
+            if app.ui.button(surf, th, f, (x + w - pad - 4 - sq, y, sq, sq), "x", "Remove this key change (the notes keep their pitch)",
+                             font=f.small):
+                app.edit(lambda tk=tick, vs=vs: ed.remove_key_at(tk, vs))
+            y += int(sq * 1.18)
     e = t.echo
     step_row("Echo", "%d ms" % round(e[0] * 1000) if e else "off",
              lambda: app.set_song(echo=None if e and e[0] <= 0.02 + 1e-9 else ((max(0.02, e[0] - 0.02),) + tuple(e[1:]) if e else None)),
@@ -1015,6 +1043,7 @@ def inspector(app):
         row("Length", "%.2f beats" % (n.dur / M.BEAT))
         row("Volume", n.vol)
         row("Instrument", n.inst)
+        row("Effects", M.marks_words(n.marks) or "none")
         inside = app.ed.inside(v, i)
         if inside:
             what = ", ".join("%s %s" % (k, nm) for k, nm in inside)
@@ -1024,6 +1053,14 @@ def inspector(app):
             if ui_button_row(app, x + pad, y, inner, bh, "Make unique", "Copy these events here so editing this note changes only this place"):
                 app.make_unique_selected()
             y += int(bh * 1.25)
+    y += int(10 * s)
+    head("Effects and key")
+    picked = len(app.selection())
+    text(surf, f.small, "%d note%s picked" % (picked, "" if picked == 1 else "s") if picked
+         else "Pick notes for effects (the key goes at the Play-from marker)", (x + pad, y), th["dim"], "tl", inner)
+    y += int(f.line * 1.2)
+    btn_row(("Effects and key...", "Vibrato, arpeggio, slide and pulse sweep on the picked notes, and key changes (E)", True,
+             app.open_note_panel))
     app.insp_max = max(0, y + app.insp_scroll - (y0 + h) + pad)
     app.insp_scroll = min(app.insp_scroll, app.insp_max)
 
@@ -1165,7 +1202,7 @@ def bottom(app):
         n = app.roll.notes[app.note_hover[0]][app.note_hover[1]]
         msg = "%s  %s  bar %d  %.2f beats  vol %d  %s%s" % (app.roll.names[n.voice], M.pitch_name(n.pitch),
                                                         n.start // max(1, rl.bar_ticks) + 1, n.dur / M.BEAT, n.vol, n.inst,
-                                                        "" if n.fx == "none" else "  " + n.fx)
+                                                        "  " + M.marks_words(n.marks) if n.marks else "")
         col = th["text"]
     else:
         msg, col = "Space play/stop   Ctrl+wheel zoom   Shift+wheel scroll   F1 help", th["dim"]
@@ -1398,7 +1435,12 @@ def fileopts_overlay(app):
     pad = int(16 * s)
     note = wrap(f.small, d["note"], w - 2 * pad) if d["note"] else []
     rh = int(f.line * 1.5)
-    h = pad * 2 + int(f.line * 1.7) + len(d["rows"]) * (rh + int(f.line * 0.4)) + len(note) * (f.small.get_linesize()) + int(f.line * 2.2)
+    gap = int(f.line * 0.4)
+    fixed = pad * 2 + int(f.line * 1.7) + len(note) * f.small.get_linesize() + int(f.line * 2.2)
+    if fixed + len(d["rows"]) * (rh + gap) > sh - 20:                    # a long dialog squeezes its rows to fit the window
+        rh = max(int(f.line * 1.05), (sh - 20 - fixed) // max(1, len(d["rows"])) - gap)
+        gap = max(2, gap // 2)
+    h = fixed + len(d["rows"]) * (rh + gap)
     r = modal(app, w, h)
     text(surf, f.bold, d["title"], (r.x + pad, r.y + pad), th["text"], "tl", r.w - 2 * pad)
     y = r.y + pad + int(f.line * 1.7)
@@ -1413,7 +1455,7 @@ def fileopts_overlay(app):
         if ui.clicked(box):
             app.fileopts_step(i, 1)
         boxes.append(box)
-        y += rh + int(f.line * 0.4)
+        y += rh + gap
     for line in note:
         text(surf, f.small, line, (r.x + pad, y), th["dim"])
         y += f.small.get_linesize()
@@ -1566,6 +1608,7 @@ HELP = (
     ("Drop a .wav", "import it as a drum sample"),
     ("Delete", "erase the selected note or drum hit"), ("Arrows (note)", "with a note picked: nudge it (Shift = octave)"),
     ("K", "set the key (e.g. D minor): the scale guide, and the song's key lines keep their notes"),
+    ("E", "effects and key changes for the selected notes (dialog: vibrato, arpeggio, slide, pulse sweep; Delete clears them)"),
     ("Alt+Up / Down", "move the selected notes one step up / down the guide's scale"),
     ("[ / ]", "finer / coarser snap grid"), ("Ctrl+Z / Y", "undo / redo"), ("Ctrl+S", "save (Ctrl+Shift+S: save as)"),
     ("T", "light / dark theme"), ("Ctrl+O", "open a file (or drop one on the window)"),
