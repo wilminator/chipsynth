@@ -84,6 +84,12 @@ of the same height, one below the other, scrolling up and down (the track height
 **T** buttons, remembered between sessions); **Piano roll** is one large piano roll for all the voices; **Tracker** is
 the grid with time running down the page.
 
+In the tracker each note shows its volume (`v10`) beside its name; a note with the volume most of its voice's notes have
+is drawn dim, so the notes that differ stand out. With the cursor on a note, `,` / `.` lower / raise its volume (Shift: by
+4), or press `/` and type the volume: one digit (0, 2-9) sets it at once, `1` waits for a second digit (10-15) or Enter,
+Backspace edits and Esc cancels. Each change is one undo step, and it is written to the song as a `v` command, so it
+survives MML export and import.
+
 ### The File menu
 
 The **File** button at the left of the top bar (or F10) opens the menu; Up / Down, Right / Left (open or close a submenu),

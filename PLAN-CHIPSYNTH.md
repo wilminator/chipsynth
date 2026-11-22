@@ -229,3 +229,5 @@ Not in C2 (later): multi-select, copy / paste, quantize (C7); the toolbar hides 
 COMPOSER C8 (2026-10-15) DONE: make pattern from selection (P; Editor.make_pattern checks the sound is unchanged), loop just the selection (Shift+Space; model.tune_range), New from generator (Ctrl+N / New button; asks "kind [seed] [mood]"). NEXT (backlog): tracker volume column, key / per-note effects from the roll, WAV import options, MIDI drums onto D1/D2.
 
 COMPOSER FILE MENU (2026-10-30) DONE (PR #21): New, Open, Save, Import and Export in one menu, the unsaved-edits dialog, "Last report..." (chipsynth/composer/filemenu.py; PLAN-FORMATS.md section 9). NEXT (backlog): as the C8 line above.
+
+COMPOSER TRACKER VOLUME COLUMN (2026-11-22) DONE: per-note volume column (`,` `.` steps, `/` then digits types a value; Editor.set_volume, one undo step, round-trips through MML), drawn dim when it is the voice's commonest volume (tracker.voice_default). The older "not done: a volume column" notes in C6 and the status line are out of date. NEXT (backlog): as the C8 line above, minus the volume column.
