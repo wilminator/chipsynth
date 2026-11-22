@@ -14,14 +14,15 @@ How a multi-song import behaves (FamiStudio songs, GoatTracker subtunes, SID Fac
     same ids are replaced).  The first of them opens.  The options dialog says where they will go.
 Anything that replaces the open song first asks about unsaved edits (guard_switch).
 """
+import re
 from pathlib import Path
 
 import pygame
 
-from chipsynth import exporter, mml, package as pk
+from chipsynth import dpcm, exporter, mml, package as pk
 from chipsynth.package import PackageError
 from chipsynth.song import Song, SongError
-from chipsynth.synth import RATE
+from chipsynth.synth import DPCM_RATES, RATE
 
 from . import fileops as fo
 from .files import backup_file, save_with_backup
@@ -136,7 +137,7 @@ class FileMenu:
             root.destroy()
             return path or ""
         except Exception:
-            self.say("No file dialog here: drag the file onto the window (a .sng, .sf2, .txt, .mid, .mml, .csp or .wav).")
+            self.say("No file dialog here: drag the file onto the window (a .sng, .sf2, .txt, .fms, .mid, .mml, .csp or .wav).")
             return ""
 
     def open_songs_overlay(self):
@@ -220,16 +221,18 @@ class FileMenu:
         several songs...), then import_file.  Formats that need nothing import at once."""
         kind = kind or fo.kind_of(path)
         if kind is None:
-            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker), .sf2 (SID Factory II) or .wav." % Path(path).name, 8.0)
+            self.say("Can't tell what %s is: import takes .mml, .mid, .txt or .fms (FamiStudio), .sng (GoatTracker), .sf2 (SID Factory II) or .wav." % Path(path).name, 8.0)
             return False
-        if kind not in ("famistudio", "goattracker", "sf2"):
+        if kind == "wav":
+            return self.import_wav_options(path)
+        if not (fo.is_famistudio(kind) or kind in ("goattracker", "sf2")):
             return self.import_file(path, kind)
         try:
             names = fo.song_names(kind, path)
         except fo.FileOpError as e:
             self.say("Can't import: %s" % e, 8.0)
             return False
-        if kind == "famistudio" and len(names) < 2:
+        if fo.is_famistudio(kind) and len(names) < 2:
             return self.import_file(path, kind)
         if len(names) > 1:
             songs = [("", "All %d songs" % len(names))] + [(str(i + 1), n) for i, n in enumerate(names)]
@@ -240,7 +243,7 @@ class FileMenu:
         if len(names) > 1:
             note = ("Several songs go into %s (%s) and the first opens; one song opens unsaved."
                     % (target.name, "the open package" if self.package_path() else "new, beside the file"))
-        if kind in ("famistudio", "sf2"):
+        if fo.is_famistudio(kind) or kind == "sf2":
             rows = [("region", "Timing", [(None, "as the file says"), ("ntsc", "NTSC"), ("pal", "PAL")], 0),
                     ("song", "Songs", songs, 0)]
         else:
@@ -250,6 +253,31 @@ class FileMenu:
             note = ("The file does not record its region or multispeed. " + note).strip()
         self.show_options("Import %s" % Path(path).name, rows, ok="Import", note=note, apply=lambda v: self.import_file(
             path, kind, region=v["region"], multispeed=v.get("multispeed", 1), song=v["song"] or None))
+        return True
+
+    def import_wav_options(self, path):
+        """Import > WAV: the options dialog (channel, DAC rate, trim, normalize, gain, level fit), then import_wav.
+        The first choice of every row is what a plain import does (rate 12, mixed, normalized, level fitted)."""
+        path = Path(path)
+        if self.ed is None:
+            self.say("Open or start a song first: a sample belongs to a song.", 6.0)
+            return False
+        rates = [(i, "%d: %d Hz, %d B/s" % (i, round(hz), round(hz / 8))) for i, hz in enumerate(DPCM_RATES)]
+        rates = [("auto", "Auto: the highest that fits")] + rates
+        rows = [("rate", "DAC rate", rates, 1 + 12),
+                ("channel", "Stereo", [("mix", "Mix to mono"), ("left", "Left only"), ("right", "Right only")], 0),
+                ("trim", "Trim silence", [(None, "Off")] + [(db, "Below %d dB" % db) for db in (-60, -48, -36, -24)], 0),
+                ("normalize", "Normalize", [(True, "On (peak to 98%)"), (False, "Off (keep the WAV's level)")], 0),
+                ("gain", "Gain", [(g, "%+d dB" % g if g else "0 dB") for g in (0, 3, 6, 12, -3, -6, -12)], 0),
+                ("fit", "Level fit", [(True, "On (quieter, cleaner)"), (False, "Off")], 0)]
+        note = ("The DAC plays these 16 rates only. Higher rates are brighter and bigger (a rate 15 second is 4.2 KB, rate 0 "
+                "is 0.5 KB); low rates sound dull and noisy but suit bass and kicks. A boost can clip: the report says.")
+
+        def go(v):
+            opts = dpcm.ImportOptions(rate=v["rate"], channel=v["channel"], normalize=v["normalize"], trim_db=v["trim"],
+                                      gain_db=float(v["gain"]), fit=v["fit"])
+            return self.import_wav(path, options=opts)
+        self.show_options("Import %s" % path.name, rows, ok="Import", note=note, apply=go)
         return True
 
     def package_path(self):
@@ -275,8 +303,8 @@ class FileMenu:
             return self.open_path(path, guard=guard)
         if kind == "mml":
             return self.import_mml(path, guard)
-        if kind not in ("famistudio", "goattracker", "sf2"):
-            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker), .sf2 (SID Factory II) or .wav." % path.name, 8.0)
+        if not (fo.is_famistudio(kind) or kind in ("goattracker", "sf2")):
+            self.say("Can't tell what %s is: import takes .mml, .mid, .txt or .fms (FamiStudio), .sng (GoatTracker), .sf2 (SID Factory II) or .wav." % path.name, 8.0)
             return False
         try:
             loaded = fo.read_import(kind, path, self.lib, region=region, multispeed=multispeed, song=song)
@@ -308,7 +336,7 @@ class FileMenu:
     def apply_import(self, loaded, kind, target):
         """Put read songs in the window (one song) or into a package file (several); show the report."""
         lines = fo.report_lines(loaded.report)
-        label = {"famistudio": "FamiStudio", "sf2": "SID Factory II"}.get(kind, "GoatTracker")
+        label = "FamiStudio" if fo.is_famistudio(kind) else "SID Factory II" if kind == "sf2" else "GoatTracker"
         if len(loaded.songs) == 1:
             sid, song, samples, title = loaded.songs[0]
             lib = None
@@ -368,11 +396,48 @@ class FileMenu:
                               apply=lambda v: self.export_choose(fmt, **v))
             return True
         if fmt == "famistudio":
-            self.show_options("Export FamiStudio text", [("region", "Timing", [("ntsc", "NTSC"), ("pal", "PAL")], 0)],
-                              ok="Choose file...", note="V1-V4 and one DPCM track only; what is left out is reported.",
-                              apply=lambda v: self.export_choose(fmt, **v))
+            pr = self.prefs
+            stamps = [("default", "%s (chipsynth's default)" % exporter.DEFAULT_FS_VERSION),
+                      ("reference", "Reference file..." + ((": " + Path(pr.fs_ref).name) if pr.fs_ref else "")),
+                      ("typed", "Typed: %s" % pr.fs_typed if pr.fs_typed else "Type a version..."),
+                      ("none", "None (leave Version out)")]
+            self.show_options("Export FamiStudio text",
+                              [("region", "Timing", [("ntsc", "NTSC"), ("pal", "PAL")], 0),
+                               ("stamp", "Version", stamps, [k for k, _ in stamps].index(pr.fs_stamp))],
+                              ok="Choose file...",
+                              note="V1-V4 and one DPCM track only; what is left out is reported. FamiStudio refuses a file stamped "
+                                   "with another version than its own: Reference file takes the Version from a file your FamiStudio exported.",
+                              apply=self.export_famistudio_stamped)
             return True
         return self.export_choose(fmt)
+
+    def export_famistudio_stamped(self, v):
+        """The FamiStudio options were accepted: settle the Version (a reference file to choose or a version to type),
+        remember the choice in the settings, then choose the file to write."""
+        pr, kind, region = self.prefs, v["stamp"], v["region"]
+
+        def go(**stamp):
+            pr.fs_stamp = kind
+            self.dirty = True
+            return self.export_choose("famistudio", region=region, **stamp)
+
+        if kind == "reference":
+            start = str(Path(pr.fs_ref).parent) if pr.fs_ref else None
+            ref = self.choose_path(False, "A text file exported by your FamiStudio", "*.txt", initialdir=start)
+            if not ref:
+                return False
+            pr.fs_ref = ref
+            return go(fs_reference=ref)
+        if kind == "typed":
+            def typed(text):
+                if not re.fullmatch(r"\d+(\.\d+){1,3}", text):
+                    self.say("A version looks like 4.2.0 (numbers and dots), not '%s'." % text, 6.0)
+                    return False
+                pr.fs_typed = text
+                return go(fs_version=text)
+            self.ask("FamiStudio version to write (e.g. 4.2.0)", pr.fs_typed or exporter.DEFAULT_FS_VERSION, typed)
+            return True
+        return go(fs_version=None if kind == "none" else exporter.DEFAULT_FS_VERSION)
 
     def export_choose(self, fmt, **opts):
         _, title, pattern, ext = fo.EXPORTS[fmt]
@@ -388,7 +453,8 @@ class FileMenu:
         pkg.add_song(sid, self.song, self.ed.lib)
         return pkg, sid
 
-    def export_as(self, fmt, path, loops=0, normalize=False, part="song", region="ntsc"):
+    def export_as(self, fmt, path, loops=0, normalize=False, part="song", region="ntsc",
+                  fs_version=exporter.DEFAULT_FS_VERSION, fs_reference=None):
         """Write the open song to `path` as wav, mid, mml, famistudio or csp with exporter.export_song, the code
         `python -m chipsynth export-song` runs.  A file it replaces is copied to backups first.  Returns True."""
         if self.song is None:
@@ -410,7 +476,8 @@ class FileMenu:
             pkg, sid = self.export_package()
             if fmt != "mml":
                 backup_file(self.root or path.parent, path)
-            r = exporter.export_song(pkg, sid, path, opts, fmt, lib=self.ed.lib, region=region)
+            r = exporter.export_song(pkg, sid, path, opts, fmt, lib=self.ed.lib, region=region,
+                                fs_version=fs_version, fs_reference=fs_reference)
         except (exporter.ExportError, PackageError, SongError, mml.MMLError, OSError) as e:
             self.say("Can't export %s: %s" % (path.name, e), 8.0)
             return False
@@ -419,8 +486,6 @@ class FileMenu:
             lines = ["warning: " + x for x in lines]
         else:
             lines = [x if x.startswith(WARNING) else "note: " + x for x in lines]
-        if fmt == "mid" and self.roll is not None and any(self.roll.dac):
-            lines.append("left out: the drum / sample lanes (D1, D2) are not in a MIDI file")
         lines = extra + lines
         what = "Exported %s" % path.name
         if fmt == "wav":

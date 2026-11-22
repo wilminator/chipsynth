@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from chipsynth import package as pk
-from chipsynth.formats import goattracker, sf2, famistudio_text as fam
+from chipsynth.formats import goattracker, sf2, famistudio_binary as fms, famistudio_text as fam
 from chipsynth.formats.report import Report
 
 # kind -> (menu label, dialog title, file patterns, suffixes it is recognised by)
@@ -20,6 +20,7 @@ IMPORTS = {
     "mml": ("MML text...", "Import MML", "*.mml", (".mml",)),
     "mid": ("MIDI file...", "Import MIDI", "*.mid *.midi", (".mid", ".midi")),
     "famistudio": ("FamiStudio text (.txt)...", "Import FamiStudio text", "*.txt", (".txt",)),
+    "famistudio_fms": ("FamiStudio project (.fms)...", "Import FamiStudio project", "*.fms", (".fms",)),
     "goattracker": ("GoatTracker 2 (.sng)...", "Import GoatTracker song", "*.sng", (".sng",)),
     "sf2": ("SID Factory II (.sf2)...", "Import SID Factory II song", "*.sf2", (".sf2",)),
     "wav": ("WAV sample...", "Import a WAV as a drum sample", "*.wav", (".wav",)),
@@ -36,6 +37,11 @@ EXPORTS = {
 
 class FileOpError(Exception):
     pass
+
+
+def is_famistudio(kind):
+    """True for both FamiStudio kinds (text and .fms project): they ask for the same options and read through one door."""
+    return kind in ("famistudio", "famistudio_fms")
 
 
 @dataclass
@@ -61,6 +67,13 @@ def _read_text(path):
         raise FileOpError("can't read %s (%s)" % (Path(path).name, e))
 
 
+def _decode(data, name):
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as e:
+        raise FileOpError("can't read %s (%s)" % (name, e))
+
+
 def _read_bytes(path):
     try:
         return Path(path).read_bytes()
@@ -72,10 +85,13 @@ def song_names(kind, path):
     """The names of the songs a FamiStudio, GoatTracker or SID Factory II file holds (empty for other kinds), in file order."""
     name = Path(path).name
     try:
-        if kind == "famistudio":
-            text = _read_text(path)
+        if is_famistudio(kind):
+            data = _read_bytes(path)
+            if fms.looks_like(data):
+                return fms.song_names(data)
+            text = _decode(data, name)
             if not fam.looks_like(text):
-                raise FileOpError("%s is not a FamiStudio text file (it should start with a Project line)" % name)
+                raise FileOpError("%s is not a FamiStudio file (a .fms project starts with FMS!, a text export with a Project line)" % name)
             return [s.attrs.get("Name", "Song %d" % (i + 1)) for i, s in enumerate(fam.parse(text).songs)]
         if kind == "goattracker":
             data = _read_bytes(path)
@@ -100,11 +116,15 @@ def read_import(kind, path, lib=None, region=None, multispeed=1, song=None):
     stem = pk.Package.safe_id(Path(path).stem)
     out = Loaded(source=name)
     try:
-        if kind == "famistudio":
-            text = _read_text(path)
-            if not fam.looks_like(text):
-                raise FileOpError("%s is not a FamiStudio text file (it should start with a Project line)" % name)
-            res = fam.load(text, song=song, region=region)
+        if is_famistudio(kind):
+            data = _read_bytes(path)
+            if fms.looks_like(data):
+                res = fms.load(data, song=song, region=region)
+            else:
+                text = _decode(data, name)
+                if not fam.looks_like(text):
+                    raise FileOpError("%s is not a FamiStudio file (a .fms project starts with FMS!, a text export with a Project line)" % name)
+                res = fam.load(text, song=song, region=region)
             out.report = res.report
             for imp in res.songs:
                 sid = stem if len(res.songs) == 1 else "%s_%s" % (stem, pk.Package.safe_id(imp.name, "song"))
