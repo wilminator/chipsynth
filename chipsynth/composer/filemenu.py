@@ -7,7 +7,7 @@ file dialog; the menu and its dialogs (`choose_path`) only find the path and the
 format code could not carry over (approximated / left out) goes to the status line and, when there is any, to the
 report overlay; "Last report..." in the menu shows it again.
 
-How a multi-song import behaves (FamiStudio songs, GoatTracker subtunes):
+How a multi-song import behaves (FamiStudio songs, GoatTracker subtunes, SID Factory II songs):
   * one song comes in as a new, unsaved song (Save asks where to put it), like opening a MIDI file;
   * several songs are written into a .csp package, as `python -m chipsynth import` does: the open song's package
     when it has a .csp file, else NAME.csp beside the imported file (an existing file keeps its other songs and the
@@ -136,7 +136,7 @@ class FileMenu:
             root.destroy()
             return path or ""
         except Exception:
-            self.say("No file dialog here: drag the file onto the window (a .sng, .txt, .mid, .mml, .csp or .wav).")
+            self.say("No file dialog here: drag the file onto the window (a .sng, .sf2, .txt, .mid, .mml, .csp or .wav).")
             return ""
 
     def open_songs_overlay(self):
@@ -220,9 +220,9 @@ class FileMenu:
         several songs...), then import_file.  Formats that need nothing import at once."""
         kind = kind or fo.kind_of(path)
         if kind is None:
-            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker) or .wav." % Path(path).name, 8.0)
+            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker), .sf2 (SID Factory II) or .wav." % Path(path).name, 8.0)
             return False
-        if kind not in ("famistudio", "goattracker"):
+        if kind not in ("famistudio", "goattracker", "sf2"):
             return self.import_file(path, kind)
         try:
             names = fo.song_names(kind, path)
@@ -240,7 +240,7 @@ class FileMenu:
         if len(names) > 1:
             note = ("Several songs go into %s (%s) and the first opens; one song opens unsaved."
                     % (target.name, "the open package" if self.package_path() else "new, beside the file"))
-        if kind == "famistudio":
+        if kind in ("famistudio", "sf2"):
             rows = [("region", "Timing", [(None, "as the file says"), ("ntsc", "NTSC"), ("pal", "PAL")], 0),
                     ("song", "Songs", songs, 0)]
         else:
@@ -275,8 +275,8 @@ class FileMenu:
             return self.open_path(path, guard=guard)
         if kind == "mml":
             return self.import_mml(path, guard)
-        if kind not in ("famistudio", "goattracker"):
-            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker) or .wav." % path.name, 8.0)
+        if kind not in ("famistudio", "goattracker", "sf2"):
+            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker), .sf2 (SID Factory II) or .wav." % path.name, 8.0)
             return False
         try:
             loaded = fo.read_import(kind, path, self.lib, region=region, multispeed=multispeed, song=song)
@@ -308,7 +308,7 @@ class FileMenu:
     def apply_import(self, loaded, kind, target):
         """Put read songs in the window (one song) or into a package file (several); show the report."""
         lines = fo.report_lines(loaded.report)
-        label = "FamiStudio" if kind == "famistudio" else "GoatTracker"
+        label = {"famistudio": "FamiStudio", "sf2": "SID Factory II"}.get(kind, "GoatTracker")
         if len(loaded.songs) == 1:
             sid, song, samples, title = loaded.songs[0]
             lib = None

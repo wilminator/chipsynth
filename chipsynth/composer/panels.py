@@ -1561,7 +1561,7 @@ HELP = (
     ("Q", "snap the selected notes to the grid"), ("Ctrl+E", "export a MIDI file (drop a .mid to import one)"), ("Drag a note", "move it; drag its right end to resize"),
     ("File / F10", "the File menu: New, Open, Save, Import, Export"),
     ("Menu keys", "Up / Down pick, Right / Left open or close Import / Export, Enter runs"),
-    ("Drop .sng/.txt", "import a GoatTracker song / FamiStudio text"),
+    ("Drop .sng/.sf2/.txt", "import a GoatTracker / SID Factory II song or FamiStudio text"),
     ("Drum lanes", "click D1 / D2 to place the picked sample; drag to move"),
     ("Drop a .wav", "import it as a drum sample"),
     ("Delete", "erase the selected note or drum hit"), ("Arrows (note)", "with a note picked: nudge it (Shift = octave)"),

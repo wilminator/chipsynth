@@ -286,3 +286,29 @@ Fixed in slice 2: the song's bpm was multiplied by the multispeed, which played 
 Instrument names are made into identifiers (anything but letters, digits and `_` becomes `_`).
 Not built: a writer (GoatTracker `.sng` export); the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
 the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
+
+**SID Factory II `.sf2` import: slice 1 built.** `chipsynth/formats/sf2.py`; `python -m chipsynth import PKG.csp FILE.sf2 [--song N] [--region pal|ntsc] [--report FILE]`
+(found by the `.sf2` ending or by the word 0x1337 after the load address) and File > Import > SID Factory II (also by dropping a `.sf2`).
+*License and what was read:* the repository (github.com/Chordian/sidfactory2, checked out 2026-11-22) ships `SIDFactoryII/COPYING`, the GPL version 2 text, and its sources name
+no version, so by section 9 of that licence any published version applies (this resolves the "unverified" in section 4 and decision 7 for reading it). Read only, nothing copied:
+`driver/driver_info.h,.cpp` (the descriptor blocks), `datasources/datasource_sequence.cpp` and `datasource_orderlist.cpp` (the byte formats), `auxilarydata/*` (song list, PAL / NTSC, table row text),
+`components/component_track.cpp` (note names), `converters/` (`sf2_interface.h`, `gt/source_sng.cpp`, `cc/source_ct.cpp`, `jch/converter_jch.cpp`: how other formats map onto the tables, which fixes the table semantics),
+and the driver notes and the user manual in `dist/documentation/`. **No stand-alone file-format document was found in the repository**; the layout below is from the editor's source. The driver binaries have no source, so the 6502 code was not read.
+*Layout:* a PRG (load address, then memory). At the load address the word 0x1337, then blocks of (id, size, data): 1 descriptor (driver name in screen codes, version), 2 driver common (not needed), 3 tables
+(type, id, name, layout 0 row / 1 column major, address, columns, rows), 4 instrument cell names, 5 music data (track count, order list and sequence pointer tables and sizes), up to 0xff. Tables are found **by name**
+(`Commands`, `Instruments`, `Wave`, `Pulse`, `Filter`, `Arp`, `Tempo`, `HR`, `Init`: ids differ between drivers). A word at 0x0ffb points at the editor's blocks (type, version, size): 2 hardware (byte 1: 0 PAL, 1 NTSC),
+4 table row text (instrument names), 5 song list (count and names). Songs share sequences and tables; each has its own order lists, at `base + song * tracks * size`.
+Order list: values below 0x80 are sequences, 0x80-0xfd set the transpose (value - 0xa0 semitones), 0xfe ends, 0xff loops to the byte position that follows. Sequence: [0xc0+command] [0xa0+instrument] [0x80+duration, +0x10 tied] note, ending in 0x7f;
+note 0 is a gate-off, 0x7e keeps the gate on, 1-0x6f are notes (C-0 = 0, so 0x30 is C-4); a duration is the number of extra rows the event lasts and holds until changed. A row is `tempo + 1` frames;
+the Tempo table is a chain that ends at 0x7f and wraps to its first row, the song's Init row names where it starts.
+*Carried:* three tracks to V1-V3, notes, gate-offs, transpose, the loop (found as the first repeat of the whole player state, so tracks of different lengths loop together), stop markers, the tempo chain and tempo command (driver 11),
+several songs (as in the editor's list), PAL / NTSC from the file, instrument names, and per instrument the ADSR, the waveform (the one played longest), a fixed or shifted pitch from the wave table, a cycling wave table as `arp`,
+a pulse table's start width and sweep (the same classification as goattracker.py), and the commands local / persistent ADSR, wave pointer, pulse pointer and arpeggio (chord table). Drivers 12, 13, 15, 16 read their own instrument bytes (waveform, pulse width, wave table); other drivers keep the notes and timing only.
+*Reported, not carried:* slide, vibrato, portamento, fret slide, main volume, filter programs and the filter table, hard restart (a sound detail), ring / sync bits, tied notes (played as new notes), the Hubbard driver's extras, a linear pulse sweep (drivers 15-16),
+tracks 4-12 of the multi-SID drivers, instrument variants a command asks for beyond the five listed, any other driver (for example NP20).
+*Verified:* the container, the order list and sequence formats, the tempo chain, the Init and Arp tables and the pulse and wave row layouts are from the editor's source, and the importer loads all 67 `.sf2` files in the repository's `music` folder
+(read locally, none copied) with every song's loop found and each song compiling to a chipsynth tune, plus 1500 randomly damaged copies without anything but an `Sf2Error`. Tests build their files by hand (`tests/test_sf2_import.py`).
+*Not verified* (from the converters and notes, not from the driver code or by ear): that a wave table row lasts one frame and that a jump costs none; that a pulse add row adds its value every frame; the arpeggio command's step length
+(taken as speed + 1 frames, and the report says so); that a tempo command takes effect on the next row and for all tracks; what a tied note and a bare 0x7e after a gate-off do to the envelope (a bare 0x7e plays the last pitch again);
+the loop target when an order list loops to a sequence byte without a transpose byte in front (the transpose in force at the end of the list is kept); notes above the 96-note table that the drivers use as noise pitches (clamped to 107);
+the pulse width byte of drivers 12-16 ("XY: X = middle 4 bits, Y = top 4 bits" in the notes, read as the byte's high nibble = middle, low nibble = top). No song was compared against the real player or by ear. Not built: an `.sf2` writer.
