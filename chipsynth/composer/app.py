@@ -22,6 +22,7 @@ from chipsynth.synth import RATE
 
 from . import layout as L, model as M, panels, tracker as TR, ui as U
 from .filemenu import FileMenu
+from .notepanel import NotePanel
 from .prefs import Prefs
 from .tracks import Stack, clamp_height
 
@@ -59,7 +60,7 @@ class NullOut:
 TR_DIGITS = {**{getattr(pygame, "K_%d" % d): d for d in range(10)}, **{getattr(pygame, "K_KP%d" % d): d for d in range(10)}}
 
 
-class Composer(FileMenu):
+class Composer(FileMenu, NotePanel):
     def __init__(self, screen, prefs=None, packages=None, lib=None, out=None, prefs_path=None, root=None):
         self.screen = screen
         self.prefs = prefs or Prefs()
@@ -123,6 +124,7 @@ class Composer(FileMenu):
         self.newdlg = dict(kind=musicgen.KINDS.index("town"), mood=0, seed="1", focus="kind", opts=set())   # the New dialog
         self.guide = None                    # (tonic, scale name) shaded in the roll, or None
         self.imported = {}                   # samples brought in from WAV files this session
+        self.panel_ctx = None                # the note panel's last dialog: its rows, voice, tick and notes
 
     # ------------------------------------------------------------ settings
     @property
@@ -785,6 +787,8 @@ class Composer(FileMenu):
             self.redo()
         elif mods & pygame.KMOD_ALT and k in (pygame.K_UP, pygame.K_DOWN) and self.selection():
             self.transpose_in_key(1 if k == pygame.K_UP else -1)
+        elif k == pygame.K_e and self.roll is not None and self.ed is not None:
+            self.open_note_panel()
         elif k == pygame.K_k and self.roll is not None and self.ed is not None:
             g = self.guide
             self.ask("Key (e.g. D minor, F# dorian, off)", "%s %s" % (M.NOTE_NAMES[g[0]], g[1]) if g else "C major", self.set_key_text)

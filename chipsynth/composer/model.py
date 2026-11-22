@@ -10,7 +10,7 @@
 from dataclasses import dataclass, field, replace
 
 from chipsynth.mml import Note, Tune, TICKS_WHOLE
-from chipsynth.songedit import effect_of
+from chipsynth.songedit import effect_of, fx_marks
 from chipsynth.synth import RATE
 
 BEAT = TICKS_WHOLE // 4
@@ -35,6 +35,12 @@ def is_black(p):
 
 
 # ------------------------------------------------------------------ the roll
+def marks_words(marks):
+    """The words for a note's effect marks ("~^" -> "vibrato, arpeggio")."""
+    words = {"~": "vibrato", "/": "slide", "^": "arpeggio", "w": "pulse sweep"}
+    return ", ".join(words[c] for c in marks if c in words)
+
+
 @dataclass
 class RollNote:
     voice: int
@@ -44,6 +50,7 @@ class RollNote:
     vol: int
     inst: str = ""
     fx: str = "none"           # one of songedit.EFFECTS
+    marks: str = ""            # the roll's marker for every effect it plays with: ~ vibrato, / slide, ^ arpeggio, w pulse sweep
 
 
 @dataclass
@@ -92,7 +99,7 @@ class Roll:
                 length=tune.length, loop_tick=tune.loop_tick, bar_ticks=tune.bar_ticks)
         for vi, voice in enumerate(tune.voices):
             for n in voice:
-                r.notes[vi].append(RollNote(vi, n.start, n.dur, n.pitch, n.vol, names(n.inst) if names else "", effect_of(n)))
+                r.notes[vi].append(RollNote(vi, n.start, n.dur, n.pitch, n.vol, names(n.inst) if names else "", effect_of(n), fx_marks(n)))
         for di, events in enumerate(tune.dac):
             plays = [e for e in events if e[1] == "play"]
             for k, (tick, kind, smp, extra) in enumerate(events):

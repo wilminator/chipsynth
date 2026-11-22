@@ -144,9 +144,10 @@ class FileMenu:
         self.overlay = "songs"
         self.overlay_scroll = 0
 
-    def show_options(self, title, rows, apply, note="", ok="OK"):
-        """The small options dialog.  rows: [(key, label, [(value, text), ...], start index)]; `apply` gets {key: value}."""
-        self.fileopts = dict(title=title, note=note, ok=ok, apply=apply, focus=0,
+    def show_options(self, title, rows, apply, note="", ok="OK", keys=None):
+        """The small options dialog.  rows: [(key, label, [(value, text), ...], start index)]; `apply` gets {key: value}
+        (and may return False to say it did not take).  `keys` is {pygame key: function} for keys of its own."""
+        self.fileopts = dict(title=title, note=note, ok=ok, apply=apply, focus=0, keys=keys or {},
                              rows=[dict(key=k, label=lab, choices=list(ch), i=i) for k, lab, ch, i in rows])
         self.overlay = "fileopts"
 
@@ -165,7 +166,9 @@ class FileMenu:
 
     def fileopts_key(self, e):
         k, d = e.key, self.fileopts
-        if k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+        if k in d.get("keys", {}):
+            d["keys"][k]()
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
             self.fileopts_finish(True)
         elif k == pygame.K_ESCAPE:
             self.fileopts_finish(False)
