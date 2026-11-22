@@ -71,7 +71,7 @@ never commit someone else's songs as test data (see section 6).
 | Triangle | V3 `tri` | no volume on the NES triangle: export ignores note volume there |
 | Noise | V4 `noise` | NES has 16 noise periods and two modes; chipsynth has `nmode` long/short, matching the mode bit; pitch maps to period |
 | DPCM | D1 (DAC) | **chipsynth's `.dpcm` is the NES delta format and uses the NES rate table** (`synth.DPCM_RATES`, index 0-15), so samples round trip as bytes; FamiStudio's `Data` is the same 1-bit deltas |
-| Expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM) | none | import: skip the channels and report; later maybe VRC6 saw / FDS and N163 waves to chipsynth `saw` / a wavetable if the engine gets one |
+| Expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM) | V5 and up (import) | import: VRC6 pulses and saw, MMC5 pulses, S5B / EPSM squares and the FDS / N163 wavetables (to the nearest chipsynth wave, reported approximate) take extra voices; VRC7, EPSM FM and rhythm and the MMC5 PCM channel are skipped and reported (section 9) |
 | volume / pitch / arpeggio / duty envelopes (per frame) | `a d s r vol`, `arp`, `vib`, `pws` | the hard part, see below |
 | note effects (vibrato, slide, volume slide, pitch, cut, delay, speed) | `Fx` events, `slide`, `Tempo` | partial |
 | tempo (frames per row, or FamiTracker BPM mode), PAL / NTSC | `Tempo` events, 96 ticks per quarter | NTSC frame 60.0988 Hz, PAL 50.0070 Hz; rows -> ticks needs one rule for "row length" |
@@ -259,9 +259,8 @@ not opened in a real FamiStudio (a test set of generated songs, NTSC and PAL, wa
 Export (WAV, MIDI, MML, FamiStudio text, package copy), the same writers and importers as the command line, with a "Last report..." entry and the unsaved-edits dialog
 (Save, Don't save, Cancel) before anything replaces the open song.
 
-Not built: simulating table-driven instruments with short per-frame notes (decision 2 above; the fit and the report come first);
-reading a version check (the importer reads any 4.x file and ignores `Version`, where FamiStudio itself refuses other versions);
-the FamiStudio binary `.fms` (import only, if at all); expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM; the importer skips their channels and reports them).
+Not built: reading a version check (the importer reads any 4.x file and ignores `Version`, where FamiStudio itself refuses other versions);
+the FamiStudio binary `.fms` (import only, if at all); VRC7, EPSM FM and rhythm (see the fidelity paragraph at the end of this section).
 
 **GoatTracker `.sng` import: slices 1 and 2 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
 errors), the three voices as V1-V3, notes, rests, key-offs, order list repeat and transpose, the restart position as the loop point, tempo changes,
@@ -286,3 +285,21 @@ Fixed in slice 2: the song's bpm was multiplied by the multispeed, which played 
 Instrument names are made into identifiers (anything but letters, digits and `_` becomes `_`).
 Not built: a writer (GoatTracker `.sng` export); the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
 the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
+
+**FamiStudio import fidelity: expansion chips and table-driven instruments** (`fs-fidelity`). `famistudio_text.py` and `envelope.py`; tests in `tests/test_famistudio_fidelity.py`, built by hand.
+Files with no expansion chip and no instrument that needs it import exactly as before (the earlier tests pass unchanged).
+
+*Expansion chips.* A channel is imported only when its chip is in the project's `Expansions` (the channel names and envelope names are from `Channel.cs` / `Envelope.cs`, MIT, read only). Channels with notes take the voices after V1-V4, in this order:
+VRC6 (Square1, Square2, Saw), MMC5 (Square1, Square2), FDS, N163 (Wave1-8), S5B (Square1-3), EPSM squares; a song has 16 voices at most, so 12 fit, and the rest are reported ("no voice left"). Each track starts with a comment naming its FamiStudio channel.
+VRC6 pulses use the eight VRC6 duties (`(n+1)/16`), the VRC6 saw is `saw`, MMC5 pulses use the NES duties. S5B and EPSM squares are 50% pulses (their noise, hardware envelope and mixer are reported, not played).
+FDS and N163 waveforms (the first wave of the table) become the nearest of sine, triangle, saw or a pulse of any width (`envelope.fit_wave`: every phase and the inverted wave are tried, the error is the RMS difference of the two shapes at equal RMS), and every such instrument is reported as approximate with its error;
+FDS modulation, wave sequences and the VRC6 saw master volume are not played. Skipped and reported: VRC7, EPSM FM and rhythm, the MMC5 PCM channel.
+
+*Table-driven instruments.* An instrument is played as one note with the fitted `a d s r` as before when everything fits. When it does not (decision 2), each note is played a frame at a time: a short note wherever the pitch, volume or duty changes, on a flat instrument (`NAME_sim`, `_d0..` per duty):
+a volume envelope whose fit error is over `GOOD`, an arpeggio envelope that is not a repeating cycle of 8 steps or fewer, an arpeggio named by a note (`Arpeggio="..."`, which was ignored before), a duty envelope that is not a sweep, a noise-mode envelope, and a pitch envelope.
+The volume of a step is the envelope times the note's volume, rounded to 0-15 (exact); a volume envelope's release point goes on past the end of the note, up to the next note. Frame `f` starts `round(f x ticks per frame)` ticks into the note, so a step is within half a tick of its frame.
+The error is reported: the tick size of a frame, and the RMS and worst pitch rounding in semitones (a pitch envelope moves in less than a semitone, a chipsynth note cannot). A pitch envelope that is a small looping swing (under a semitone, measured on C4) is a vibrato (`vib`) instead, with its RMS error.
+When a frame is shorter than a tick (a tempo of about 30 bpm), nothing is simulated and the fit is used, with a report line.
+**Not verified:** FamiStudio's pitch envelope unit and sign were not found in the documentation or the source files that could be fetched; this assumes one unit is one step of the NES period register (16 per square cycle, 32 for the triangle, 14 for the VRC6 saw), positive is higher, and a relative envelope adds its value each frame and stops where a non-looping one ends.
+Pitch envelopes on the noise, FDS, N163, S5B and EPSM channels are still reported as left out (their units differ). Whether the VRC6 saw plays the octave its note name says, how FamiStudio holds the last value of an envelope without a loop, and that a note without a release point stops dead at its end, are taken from the existing importer and not checked against FamiStudio.
+Nothing was compared against FamiStudio's own playback or by ear; the check was that the rendered frames follow the envelope (a 15 / 5 envelope renders at about 2.9 : 1).
