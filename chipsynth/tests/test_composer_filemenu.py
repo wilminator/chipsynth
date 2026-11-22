@@ -676,8 +676,6 @@ class ExportTests(Base):
         self.assertFalse(target.exists())
         self.assertIn("not a FamiStudio text file", a.message)
 
-    def test_midi_export_writes_the_drum_lanes_and_names_what_it_cannot(self):
-
     def test_goattracker_export_asks_for_its_options_and_reports_what_it_left_out(self):
         a = self.a
         self.assertTrue(a.export_dialog("goattracker"))
@@ -696,7 +694,7 @@ class ExportTests(Base):
         self.assertEqual(len(res.songs), 1)
         a.frame()
 
-    def test_midi_export_says_the_drum_lanes_are_not_in_it(self):
+    def test_midi_export_writes_the_drum_lanes_and_names_what_it_cannot(self):
         a = self.a
         song = Song.from_mml(musicgen.generate("town", 1, "", None, dac=True), a.lib)
         self.assertTrue(a.load_song(song, "Drums"))
