@@ -879,6 +879,83 @@ class SidWizardImportTests(Base):
         with self.assertRaises(fo.FileOpError):
             fo.song_names("sidwizard", self.write("x.swm", b"nope"))
 
+class MidiDrumLaneOptionTests(Base):
+    """Import > MIDI (and Open of a .mid, and a dropped .mid) asks for the Drum lanes when the file has percussion."""
+    def drums(self, hits):
+        from chipsynth.tests.test_midi import drum_file
+        return self.write("beat.mid", drum_file(hits, melody=[(0, 60, 96)]))
+
+    FIVE = [(0, 36, 100), (0, 38, 90), (0, 42, 80), (0, 49, 127), (0, 47, 70)]
+
+    def test_a_file_with_drums_shows_the_drum_lanes_row_with_auto_first(self):
+        a = self.a
+        self.assertTrue(a.import_begin(self.drums(self.FIVE)))
+        self.assertEqual(a.overlay, "fileopts")
+        rows = {r["key"]: r for r in a.fileopts["rows"]}
+        self.assertEqual(list(rows), ["drum_lanes"])
+        self.assertEqual(rows["drum_lanes"]["label"], "Drum lanes")
+        self.assertEqual([c[0] for c in rows["drum_lanes"]["choices"]], ["auto", 2, 3, 4, 5, 6, 7, 8])
+        self.assertEqual(a.fileopts_values()["drum_lanes"], "auto")
+        a.frame()                                                  # the dialog draws
+        a.frame([key(pygame.K_RETURN)])                            # OK: Auto
+        self.assertIsNone(a.overlay)
+        self.assertEqual(a.roll.nd, 5)
+        self.assertEqual(len(a.roll.dac[4]), 1)
+        self.assertTrue(any(x.startswith("drums: 5 hits on 5 lanes") for x in a.last_report[1]), a.last_report)
+        self.assertIn("5 lanes", a.message)
+
+    def test_a_fixed_number_limits_the_lanes_and_the_report_says_what_did_not_fit(self):
+        a = self.a
+        a.open_begin(self.drums(self.FIVE))
+        self.assertEqual(a.overlay, "fileopts")
+        a.fileopts_step(0, 3)                                      # Auto, 2, 3, 4
+        self.assertEqual(a.fileopts_values()["drum_lanes"], 4)
+        a.frame([key(pygame.K_RETURN)])
+        self.assertEqual(a.roll.nd, 4)
+        self.assertEqual(a.overlay, "report")                      # a warning: something did not fit
+        lines = a.last_report[1]
+        self.assertTrue(any(x.startswith("warning:") and "did not fit" in x and "D1-D4" in x for x in lines), lines)
+        self.assertTrue(any("4 lanes" in x and "at most 4" in x for x in lines), lines)
+
+    def test_escape_cancels_and_changes_nothing(self):
+        a = self.a
+        a.import_begin(self.drums(self.FIVE))
+        a.frame([key(pygame.K_ESCAPE)])
+        self.assertIsNone(a.overlay)
+        self.assertEqual(a.roll.nd, 2)
+        self.assertEqual(a.roll.nv, 4)                             # still the test song
+
+    def test_a_midi_without_drums_opens_at_once_and_open_path_keeps_auto(self):
+        a = self.a
+        song = Song.from_mml("V1: c d e f\n")
+        plain = self.write("plain.mid", midi.to_midi(song.compile(mml.builtin_library())))
+        self.assertTrue(a.import_begin(plain))
+        self.assertNotEqual(a.overlay, "fileopts")
+        self.assertTrue(a.open_path(self.drums(self.FIVE)))        # no dialog on this route: the default, Auto
+        self.assertEqual(a.roll.nd, 5)
+
+    def test_the_menu_route_and_the_drop_route_both_ask(self):
+        a = self.a
+        path = self.drums(self.FIVE)
+        a.frame([pygame.event.Event(pygame.DROPFILE, file=str(path))])
+        self.assertEqual(a.overlay, "fileopts")
+        a.fileopts_finish(False)
+        asked = []
+        a.choose_path = lambda save, title, pattern, **kw: asked.append((save, title, pattern)) or str(path)
+        self.open_menu()
+        self.click(self.row("Import"))
+        self.click(self.row("MIDI", sub=True))
+        self.assertEqual(asked, [(False, "Import MIDI", "*.mid *.midi")])
+        self.assertEqual(a.overlay, "fileopts")
+
+    def test_import_file_takes_the_drum_lanes_directly(self):
+        a = self.a
+        self.assertTrue(a.import_file(self.drums(self.FIVE), "mid", drum_lanes=2))
+        self.assertEqual(a.roll.nd, 2)
+        self.assertTrue(any("did not fit" in x for x in a.last_report[1]), a.last_report)
+        self.assertTrue(a.import_file(self.drums(self.FIVE), "mid"))
+        self.assertEqual(a.roll.nd, 5)
+
 
 if __name__ == "__main__":
     unittest.main()
