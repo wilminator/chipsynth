@@ -1,0 +1,49 @@
+name: Release
+
+# Decides the next version from the commit messages (python-semantic-release, Conventional Commits), and if there is
+# one: updates pyproject.toml and CHANGELOG.md, commits, tags it and creates the GitHub release.
+# It does NOT build or upload anything; deploy.yml does that, behind the `release` environment.
+# Called by ci-cd.yml for pushes to main; can also be started by hand (on main).
+on:
+  workflow_call:
+    outputs:
+      released:
+        description: "'true' if a new version was made and needs to be deployed."
+        value: ${{ jobs.release.outputs.released }}
+      tag:
+        description: The git tag of the new version (the same text as the version).
+        value: ${{ jobs.release.outputs.tag }}
+  workflow_dispatch:
+
+# Only one release at a time, and never cancel one halfway.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Only on main; the release commit and tag are pushed back to it.
+    if: github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: write   # push the version commit and tag, create the GitHub release
+
+    outputs:
+      released: ${{ steps.semrel.outputs.released }}
+      tag: ${{ steps.semrel.outputs.tag }}
+
+    steps:
+      - name: Check-out repository (all history and tags, which the version is worked out from)
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Python Semantic Release
+        id: semrel
+        uses: python-semantic-release/python-semantic-release@v10.7.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}

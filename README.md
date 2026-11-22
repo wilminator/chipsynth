@@ -4,6 +4,28 @@ A small chip-style synthesizer, a tune language (MML) and a player, in Python.  
 sine, noise) plus two DAC sample channels, rendered to stereo at 44.1 kHz.  Needs numpy and scipy; pygame only for live
 sound.  Copyright (C) 2026 Michael Allen Wilmes.
 
+## Install
+
+Python 3.11 or newer.
+
+```console
+$ pip install chipsynth
+```
+
+That is the core: the tune language, the synth and player, the file formats and the command line (`chipsynth`, or
+`python -m chipsynth`), which need only numpy and scipy. Live sound and the song composer need pygame:
+
+```console
+$ pip install "chipsynth[composer]"
+```
+
+(`[play]` is the same, for live sound only; on Python 3.14 the extra installs pygame-ce, the maintained pygame fork,
+which is imported as `pygame` too.) Then `chipsynth-composer` opens the composer. From a clone of the repository:
+
+```console
+$ pip install -e ".[composer,dev]"
+```
+
 ## Quick start
 
     from chipsynth import parse, TunePlayer, render_wav
@@ -41,7 +63,7 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `output.py` | `MusicOut`: live playback through pygame (the only place pygame is used) |
 | `musicgen.py` | a seeded tune generator (`generate(kind, seed, mood, tempo)` returns MML text) |
 
-The tune language is described in `DESIGN-MUSIC.md` (project root) and, shorter, on the Music editor's help pages.
+The tune language is described in [`DESIGN-MUSIC.md`](https://github.com/wilminator/chipsynth/blob/main/DESIGN-MUSIC.md) (project root) and, shorter, on the Music editor's help pages.
 Rendering is exact: the same samples come out however the output is cut into blocks.
 
 ## WAV import options (`dpcm.py`)
@@ -75,7 +97,7 @@ yourself). It imports nothing from any host application.
 
     python -m chipsynth.composer [GAMEDIR] [SONG] [--nosound] [--reset]
 
-`python -m chipsynth.compose` is the same command. GAMEDIR is a folder with a `music/` folder (loose `.mml` files, `.csp`
+`python -m chipsynth.compose` and the `chipsynth-composer` command are the same command. GAMEDIR is a folder with a `music/` folder (loose `.mml` files, `.csp`
 packages, `music/lib`); SONG is a song id like `forest:dawn` or a `.mml` / `.csp` path. With no arguments it opens a
 generated tune.
 
@@ -151,7 +173,13 @@ work is `components.py` (`components`, `select`, `export_mml`, `import_mml`) and
 
 ## Tests
 
-    python -m unittest discover -t . -s chipsynth/tests      (from the project root)
+From the project root (the dummy drivers let the composer's tests run without a screen or a sound card):
+
+```console
+$ SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python -m unittest discover -s chipsynth/tests -t .
+```
+
+The tests are in the source distribution but not in the wheel. Contributing: see `CONTRIBUTING.md`; releases: `RELEASING.md`.
 
 `tests/test_boundary.py` fails if the library ever imports the game or anything beyond numpy and scipy (pygame is allowed
 only lazily in `output.py` and in `composer/`). The suite needs nothing outside this directory (test data is in

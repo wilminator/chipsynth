@@ -395,5 +395,10 @@ def main(argv):
     return 0
 
 
-if __name__ == "__main__":
+def cli():
+    """The `chipsynth` console command (pyproject [project.scripts]): main() on the process's arguments."""
     sys.exit(main(sys.argv[1:]))
+
+
+if __name__ == "__main__":
+    cli()

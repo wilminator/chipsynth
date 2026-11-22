@@ -1,0 +1,3 @@
+# The sdist carries what the wheel leaves out: the tests with their data, and the design notes.
+recursive-include chipsynth/tests *.py *.mml *.txt *.dpcm
+include DESIGN-MUSIC.md CHANGELOG.md RELEASING.md CONTRIBUTING.md CONDUCT.md

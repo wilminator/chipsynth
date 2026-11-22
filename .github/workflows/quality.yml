@@ -1,0 +1,52 @@
+name: Quality
+
+# The test suite on every Python the package supports (and on Windows and macOS once each).
+# Called by ci-cd.yml; can also be run by hand from the Actions tab.
+on: [workflow_call, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python: "3.13"
+          - os: macos-latest
+            python: "3.13"
+
+    # No screen and no sound card on a runner: pygame uses its dummy drivers.
+    env:
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+      PYTHONUTF8: "1"
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install chipsynth with the composer extra
+        run: python -m pip install -e ".[composer]"
+
+      - name: Run the tests
+        run: python -m unittest discover -s chipsynth/tests -t .

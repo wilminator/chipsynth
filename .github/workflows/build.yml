@@ -1,0 +1,77 @@
+name: Build
+
+# Builds the sdist and the wheel, checks them, installs the wheel into a clean virtual environment and uses it.
+# Called by ci-cd.yml on every run (the build check) and by deploy.yml (the files that get uploaded).
+# It never uploads anything to PyPI; it only leaves the files as a workflow artifact.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The branch, tag or commit to build (empty = the ref that triggered the run).
+        type: string
+        required: false
+        default: ""
+      artifact-name:
+        description: Name of the workflow artifact that holds dist/.
+        type: string
+        required: false
+        default: dist
+      expected-version:
+        description: If set, the built version must be exactly this (a release tag must match pyproject.toml).
+        type: string
+        required: false
+        default: ""
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the build tools
+        run: python -m pip install build twine
+
+      - name: Build the sdist and the wheel
+        run: python -m build
+
+      - name: Check the package metadata (twine check)
+        run: python -m twine check --strict dist/*
+
+      - name: Check the version
+        if: ${{ inputs.expected-version != '' }}
+        env:
+          EXPECTED: ${{ inputs.expected-version }}
+        run: |
+          shopt -s nullglob
+          wheels=(dist/chipsynth-*.whl)
+          test "${#wheels[@]}" -eq 1
+          actual=$(basename "${wheels[0]}" | cut -d- -f2)
+          echo "built $actual, expected $EXPECTED"
+          test "$actual" = "$EXPECTED"
+
+      - name: Install the wheel into a clean environment and use it
+        run: bash .github/scripts/smoke-wheel.sh dist/*.whl
+
+      - name: Keep the files
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
