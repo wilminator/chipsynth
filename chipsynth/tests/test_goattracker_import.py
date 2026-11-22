@@ -87,6 +87,12 @@ class PlayTests(unittest.TestCase):
         notes = [e for e in ev if e.__class__.__name__ == "Note"]
         self.assertEqual([(n.letter, n.dur) for n in notes], [("c", 48), ("e", 24)])
 
+    def test_a_note_with_no_key_off_lasts_to_the_end_of_the_song_and_not_a_frame_more(self):
+        p = [(C4, 1, 0, 0), (gt.REST, 0, 0, 0), (gt.REST, 0, 0, 0)]
+        data = sng([[0, gt.LOOPSONG, 0]] * 3, [pat(*p)], [(0x09, 0xA4, 1, 0, 0, 0, 0, 2, 0x41, "t")], [([0x41], [0x80]), ([], []), ([], []), ([], [])])
+        notes = [e for e in self.load(data)[1].tracks["V1"] if e.__class__.__name__ == "Note"]
+        self.assertEqual([n.dur for n in notes], [72])            # three rows of 24 ticks
+
     def test_bpm_is_set_from_the_region(self):
         self.assertEqual(self.load(simple())[1].bpm, 125)
         self.assertEqual(self.load(simple(), region="ntsc")[1].bpm, 150)
@@ -400,6 +406,10 @@ class VibratoTests(unittest.TestCase):
         r, song = load(inst(sp=1, vd=4), self.SPEED)
         self.assertEqual(only(song).vib_rate, 3)
         self.assertIn("vibrato delay 4 is not kept", text(r))
+
+    def test_a_tempo_command_on_the_note_row_does_not_stop_the_instruments_vibrato(self):
+        r, song = load(inst(sp=1, vd=1), self.SPEED, cmd=gt.CMD_SETTEMPO, data=6)
+        self.assertEqual((only(song).vib_rate, only(song).vib_depth), (3, 10))
 
     def test_without_a_delay_the_instruments_entry_does_nothing(self):
         r, song = load(inst(sp=1, vd=0), self.SPEED)

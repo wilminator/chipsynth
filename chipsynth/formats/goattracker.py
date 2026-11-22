@@ -282,6 +282,8 @@ def _timeline(tune, sub, hz_mult, report):
             rows[c].append((frame, note, inst, cmd, data, trans))
             left[c] = tempo[c] - 1
         frame += 1
+    if all(finished):
+        frame -= 1                        # the last channel was found finished one frame after its last row ended
     if frame >= MAX_FRAMES:
         report.note("the song was cut at twenty minutes (no end or loop was found)")
     end = max([frame] + [r[-1][0] + 1 for r in rows if r])
@@ -1201,7 +1203,7 @@ class _Instruments:
         label, base = self.bases[idx]
         if cmd == CMD_VIBRATO:
             entry = data
-        elif cmd == 0 and ins.vibdelay:
+        elif cmd not in (1, 2, 3) and ins.vibdelay:      # a tempo, ADSR or other command does not stop the instrument's vibrato
             entry = ins.ptr[STBL]
         else:
             entry = 0
