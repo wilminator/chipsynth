@@ -217,8 +217,6 @@ def import_cmd(args):
             continue
         if Path(f).suffix.lower() == ".sf2" or sf2.looks_like(_head(f)):
             import_sf2(a, pkg, f, lib)
-        elif Path(f).suffix.lower() == ".swm" or sidwizard.looks_like(_head(f)):
-            import_sidwizard(a, pkg, f, lib)
             continue
         if Path(f).suffix.lower() == ".swm" or sidwizard.looks_like(_head(f)):
             import_sidwizard(a, pkg, f, lib)
@@ -263,7 +261,7 @@ def import_wav(a, pkg, f):
 def _head(f):
     """The first bytes of a file (to tell a GoatTracker, SID Factory II or SID-Wizard song from MML by its start)."""
     with open(f, "rb") as fh:
-        return fh.read(4)
+        return fh.read(32)
 
 
 def import_goattracker(a, pkg, f, lib):
