@@ -94,12 +94,12 @@ Enter and Esc work it from the keyboard. The shortcuts keep working with or with
 | New from generator... (Ctrl+N), New blank song | a generated tune, or four empty bars; both open unsaved |
 | Open... (Ctrl+O), Open from packages... | a `.csp` / `.mml` / `.mid` file chooser; the Songs list of the loaded packages |
 | Save (Ctrl+S), Save As... (Ctrl+Shift+S) | as before: `.csp` writes a package, `.mml` text, `.mid` a MIDI export |
-| Import > MML, MIDI, FamiStudio text (.txt), GoatTracker 2 (.sng), WAV sample | the same readers as `python -m chipsynth import` |
+| Import > MML, MIDI, FamiStudio text (.txt), FamiStudio project (.fms), GoatTracker 2 (.sng), WAV sample | the same readers as `python -m chipsynth import` |
 | Export > WAV, MIDI (Ctrl+E), MML, FamiStudio text (.txt), Package copy (.csp) | the same writer as `python -m chipsynth export-song`, for the song as it is now (unsaved edits included) |
 | Last report... | shows the latest import / export report again |
 
 What a conversion approximated or left out is never silent: the status line counts it, and a short report window lists
-every line (a clean conversion needs no window). Dropping a `.sng`, `.txt` or `.wav` on the window imports it too.
+every line (a clean conversion needs no window). Dropping a `.sng`, `.txt`, `.fms` or `.wav` on the window imports it too.
 
 * **WAV** export asks for the trips round the loop, normalizing to -1 dBFS, and the whole song or just the selected notes;
   the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL; **GoatTracker** import asks the region
@@ -124,7 +124,7 @@ and `COMMAND -h` give every option.
 
 | command | does |
 |---|---|
-| `import PKG.csp FILE.mml...` | add songs to a package (created if missing). `--id NAME` names the song, `--shared` adds a library file's instruments / fx / scales / samples to the package, `--no-replace` refuses an id already there, `--lib DIR` / `--samples DIR` say where a game's `music/lib` and `.dpcm` files are. `.mid` files work too, and so do FamiStudio text files (`.txt`, from File > Export > FamiStudio Text; `--song NAME`, `--region ntsc|pal`, `--report FILE`), and so do GoatTracker 2 songs (`.sng`; `--song N` is the subtune, `--region pal|ntsc` defaults to pal, `--multispeed 1|2|4`, `--report FILE`: the file records none of these) |
+| `import PKG.csp FILE.mml...` | add songs to a package (created if missing). `--id NAME` names the song, `--shared` adds a library file's instruments / fx / scales / samples to the package, `--no-replace` refuses an id already there, `--lib DIR` / `--samples DIR` say where a game's `music/lib` and `.dpcm` files are. `.mid` files work too, and so do FamiStudio text files (`.txt`, from File > Export > FamiStudio Text; `--song NAME`, `--region ntsc|pal`, `--report FILE`) and FamiStudio projects (`.fms`, formats 15 to 19 = FamiStudio 4.1 to 4.5, same options), and so do GoatTracker 2 songs (`.sng`; `--song N` is the subtune, `--region pal|ntsc` defaults to pal, `--multispeed 1|2|4`, `--report FILE`: the file records none of these) |
 | `list SOURCE...` | the components of `.csp` / `.mml` / folders: `--type song,sample,...` (aliases `instr`, `key`), `--name 'd*'` (a glob; `TYPE:NAME` for one type) |
 | `export PKG.csp` | components as MML: `-d DIR` (songs as `ID.mml`, the rest in `lib/PACKAGE.mml`, samples in `samples/NAME.dpcm`, which is a game's `music/` layout), or `-o FILE` (`-` for stdout) for one thing; `--type` / `--name` choose; `--midi` writes songs as `.mid`. With no `--type`: songs and the shared parts |
 | `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml` or `csp` (from OUT's ending, or `-f`). `render` is the same command |

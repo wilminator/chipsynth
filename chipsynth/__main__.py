@@ -8,8 +8,8 @@
   dump PKG.csp [-o FILE]          the package as text (stdout by default)
   build TEXT [-o PKG.csp]         assemble a package from a dump
   import PKG.csp FILE.mml ...     add songs (song id = file name, with `_` for anything an id may not hold) to a package, creating it if needed
-                                  (FILE.mid works too; FILE.txt from FamiStudio's File > Export > FamiStudio Text works too;
-                                  so does a GoatTracker 2 FILE.sng)
+                                  (FILE.mid works too; FILE.txt from FamiStudio's File > Export > FamiStudio Text works too,
+                                  and so does a FamiStudio project FILE.fms (4.1 to 4.5); so does a GoatTracker 2 FILE.sng)
                                     --id NAME     the song id, when there is one file
                                     --shared      the files are libraries ([instr] [fx] [key] [sample]): their
                                                   parts are added to the package for all its songs
@@ -45,7 +45,7 @@ import sys
 from pathlib import Path
 
 from . import components as comp, exporter, mml, midi, package as pk, packagetext
-from .formats import goattracker
+from .formats import famistudio_binary, goattracker
 from .packageset import PackageSet
 from .song import Song
 
@@ -189,7 +189,7 @@ def import_cmd(args):
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, shared=True)
             print("added the shared parts of", f)
             continue
-        if Path(f).suffix.lower() == ".txt":
+        if Path(f).suffix.lower() in (".txt", ".fms") or famistudio_binary.looks_like(_head(f)):
             import_famistudio(a, pkg, f, lib)
             continue
         if Path(f).suffix.lower() == ".sng" or goattracker.looks_like(_head(f)):
@@ -249,10 +249,17 @@ def import_goattracker(a, pkg, f, lib):
 
 def import_famistudio(a, pkg, f, lib):
     from .formats import famistudio_text as fam
-    text = Path(f).read_text(encoding="utf-8-sig")
-    if not fam.looks_like(text):
-        raise pk.PackageError("%s is not a FamiStudio text file (it should start with a Project line)" % f)
-    res = fam.load(text, song=a.song, region=a.region)
+    data = Path(f).read_bytes()
+    try:
+        if famistudio_binary.looks_like(data):                       # a .fms project, by its FMS! start
+            res = famistudio_binary.load(data, song=a.song, region=a.region)
+        else:
+            text = data.decode("utf-8-sig", errors="replace")
+            if not fam.looks_like(text):
+                raise pk.PackageError("%s is not a FamiStudio file (a .fms project starts with FMS!, a text export with a Project line)" % f)
+            res = fam.load(text, song=a.song, region=a.region)
+    except fam.FamiStudioError as e:
+        raise pk.PackageError("%s: %s" % (f, e))
     if a.id and len(res.songs) != 1:
         raise pk.PackageError("--id needs one song: the file has %d (pick one with --song)" % len(res.songs))
     stem = pk.Package.safe_id(Path(f).stem)
