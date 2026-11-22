@@ -1,0 +1,66 @@
+name: CI-CD
+
+# The one workflow that runs by itself (quality.yml, build.yml, release.yml and deploy.yml are called from here).
+#   every push and pull request: tests on the supported Pythons + a build check
+#   a push to main that passed:   python-semantic-release makes the next version (if the commits call for one),
+#                                 then deploy.yml uploads it to PyPI once the `release` environment is approved
+#   by hand (Actions > CI-CD > Run workflow, on main): with `deploy_tag` empty it does what a push to main does;
+#                                 with `deploy_tag` set (an existing tag such as 0.1.0) it skips the release step
+#                                 and only uploads that tag, which is how the very first version goes out
+# PyPI's trusted publisher is registered for THIS file name (a reusable workflow is trusted by its caller's name).
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy_tag:
+        description: "Only upload this existing tag (e.g. 0.1.0) to PyPI; leave empty for a normal run"
+        type: string
+        required: false
+        default: ""
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+
+  build:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    needs: [quality, build]
+
+    # A push to main, or a hand-started run on main without a tag to deploy.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_tag == ''))
+
+    permissions:
+      contents: write
+
+    uses: ./.github/workflows/release.yml
+
+  deploy:
+    needs: [quality, build, release]
+
+    # Skipped-but-not-failed upstream jobs are fine (a deploy_tag run skips release); a failed or cancelled one is not.
+    if: >-
+      ${{ !cancelled() && !failure() && github.ref == 'refs/heads/main' &&
+      (needs.release.outputs.released == 'true' ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_tag != '')) }}
+
+    permissions:
+      id-token: write   # lets the called upload job ask PyPI for a short-lived token
+      contents: read
+
+    uses: ./.github/workflows/deploy.yml
+    with:
+      tag: ${{ needs.release.outputs.released == 'true' && needs.release.outputs.tag || inputs.deploy_tag }}

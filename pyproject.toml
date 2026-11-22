@@ -4,21 +4,95 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chipsynth"
-version = "0.1.0"
+version = "0.1.0"                # kept current by python-semantic-release on release; do not edit by hand
 description = "A small chip-style synthesizer, an MML tune language, a seeded song generator and a visual song composer."
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "Michael Allen Wilmes" }]
+keywords = [
+    "chiptune", "synthesizer", "8-bit", "nes", "mml", "music", "midi", "dpcm",
+    "famistudio", "goattracker", "tracker", "game-audio", "pygame",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Sound/Audio :: MIDI",
+    "Topic :: Multimedia :: Sound/Audio :: Sound Synthesis",
+    "Topic :: Games/Entertainment",
+]
+# The core (parser, synth, player, exporters, command line) needs only numpy and scipy.
 dependencies = ["numpy>=1.26", "scipy>=1.11"]
 
 [project.optional-dependencies]
-play = ["pygame>=2.5"]          # live sound output
-composer = ["pygame>=2.5"]      # the song composer window (python -m chipsynth.composer)
+# pygame has no wheels for Python 3.14 yet; pygame-ce is the drop-in fork (it is imported as `pygame` too).
+play = [                         # live sound output (chipsynth.MusicOut)
+    "pygame>=2.5; python_version < '3.14'",
+    "pygame-ce>=2.5; python_version >= '3.14'",
+]
+composer = [                     # the song composer window (chipsynth-composer, python -m chipsynth.composer)
+    "pygame>=2.5; python_version < '3.14'",
+    "pygame-ce>=2.5; python_version >= '3.14'",
+]
+all = ["chipsynth[play,composer]"]
+dev = [                          # what the build and the release tooling use
+    "build>=1.2",
+    "twine>=6.1",
+    "python-semantic-release>=10.7,<11",
+]
+
+[project.scripts]
+chipsynth = "chipsynth.__main__:cli"
+chipsynth-composer = "chipsynth.composer.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/wilminator/chipsynth"
+Documentation = "https://github.com/wilminator/chipsynth#readme"
+Source = "https://github.com/wilminator/chipsynth"
+"Bug Tracker" = "https://github.com/wilminator/chipsynth/issues"
+Changelog = "https://github.com/wilminator/chipsynth/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+include-package-data = false     # MANIFEST.in feeds the sdist only; the wheel is just the packages below
 
 [tool.setuptools.packages.find]
 include = ["chipsynth*"]
+exclude = ["chipsynth.tests*"]   # the tests and their data stay out of the wheel; the sdist carries them (MANIFEST.in)
 
-[tool.setuptools.package-data]
-chipsynth = ["tests/data/*"]
+# No package-data: the DPCM drum kit (chipsynth/kit.py) is built into the code, and the files in
+# chipsynth/tests/data are test fixtures only.
+
+[tool.semantic_release]
+# Versions come from Conventional Commits (feat: minor, fix: / perf: patch, "!" or BREAKING CHANGE: major).
+# While the version is 0.x a breaking change bumps the minor, not to 1.0.0.
+commit_parser = "conventional"
+tag_format = "{version}"                      # tags are 0.2.0, not v0.2.0 (as in sparse_file)
+version_toml = ["pyproject.toml:project.version"]
+allow_zero_version = true
+major_on_zero = false
+build_command = ""                            # building and uploading is deploy.yml's job, not semantic-release's
+commit_message = "chore(release): {version} [skip ci]"
+
+[tool.semantic_release.branches.main]
+match = "main"
+
+[tool.semantic_release.changelog]
+mode = "update"                               # keep the hand-written part of CHANGELOG.md; add new releases above it
+exclude_commit_patterns = ['''^chore\(release\):''']
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+
+[tool.semantic_release.remote]
+type = "github"
+token = { env = "GH_TOKEN" }
