@@ -9,7 +9,10 @@
   build TEXT [-o PKG.csp]         assemble a package from a dump
   import PKG.csp FILE.mml ...     add songs (song id = file name, with `_` for anything an id may not hold) to a package, creating it if needed
                                   (FILE.mid works too; FILE.txt from FamiStudio's File > Export > FamiStudio Text works too;
-                                  so does a GoatTracker 2 FILE.sng)
+                                  so does a FamiStudio project FILE.fms (4.1 to 4.5); so does a GoatTracker 2 FILE.sng; a FILE.wav is added as a DAC sample: --rate R (index,
+                                  Hz or auto, default 12) --channel mix|left|right|stereo --trim [DB] --no-normalize
+                                  --gain DB --fade MS --max-seconds S --max-bytes N --truncate --no-fit; the result
+                                  is reported: rate, length, bytes, clipping)
                                     --id NAME     the song id, when there is one file
                                     --shared      the files are libraries ([instr] [fx] [key] [sample]): their
                                                   parts are added to the package for all its songs
@@ -27,7 +30,7 @@
                                     --type T --name GLOB   which components   --midi   songs as .mid instead
   export-song SOURCE[:SONG] [SONG] -o OUT [options]      (also: render)
                                   one song as wav, mid, mml, csp or famistudio (a .txt FamiStudio can import:
-                                  V1-V4 and D1 only; --region ntsc|pal, --fs-version X.Y.Z; what it left out is printed) (from OUT's ending, or --format)
+                                  V1-V4 and D1 only; --region ntsc|pal, --fs-version X.Y.Z|none, --fs-reference FILE; what it left out is printed) (from OUT's ending, or --format)
                                     wav only: --volume V (0.5, 50%, -6dB)  --normalize [--peak DB, default -1]
                                               --start T  --end T   (1.5 | 250ms | 1:05.5 | 88200f = frames)
                                               --loops N  (trips round the loop)  --tail SECONDS  (default 2)
@@ -48,8 +51,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import components as comp, exporter, mml, midi, package as pk, packagetext
-from .formats import goattracker
+from . import components as comp, dpcm, exporter, mml, midi, package as pk, packagetext
+from .formats import famistudio_binary, goattracker
 from .packageset import PackageSet
 from .song import Song
 
@@ -180,6 +183,9 @@ def import_cmd(args):
     p.add_argument("--multispeed", type=int, choices=(1, 2, 4), default=1,
                    help="(GoatTracker) frames the player runs for each video frame (default 1: the file does not say)")
     p.add_argument("--report", metavar="FILE", help="(FamiStudio, GoatTracker) also write what was changed or left out, as JSON")
+    wavg = p.add_argument_group("WAV samples", "a .wav file is added to the package as a DAC sample (named by --id, else by "
+                                               "the file name); these options apply to .wav files only")
+    dpcm.add_import_arguments(wavg, fit_default=True)
     add_library_options(p)
     a = p.parse_args(args)
     if a.id and len(a.files) != 1:
@@ -195,7 +201,10 @@ def import_cmd(args):
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, shared=True)
             print("added the shared parts of", f)
             continue
-        if Path(f).suffix.lower() == ".txt":
+        if Path(f).suffix.lower() == ".wav":
+            import_wav(a, pkg, f)
+            continue
+        if Path(f).suffix.lower() in (".txt", ".fms") or famistudio_binary.looks_like(_head(f)):
             import_famistudio(a, pkg, f, lib)
             continue
         if Path(f).suffix.lower() == ".sng" or goattracker.looks_like(_head(f)):
@@ -206,13 +215,36 @@ def import_cmd(args):
             raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
         verb = "replaced" if sid in pkg.songs else "added"
         if is_midi:
-            pkg.add_song(sid, midi.from_midi(Path(f).read_bytes(), voices=a.voices), lib)
+            msong = midi.from_midi(Path(f).read_bytes(), voices=a.voices)
+            for w in msong.warnings:
+                print("warning:", w)
+            pkg.add_song(sid, msong, lib)
         else:
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, song_id=sid)
         print("%s song '%s' from %s" % (verb, sid, f))
     pk.save(pkg, path)
     print("%s: %d song(s)" % (path, len(pkg.songs)))
     return 0
+
+
+def import_wav(a, pkg, f):
+    """Add a WAV file to the package as a DAC sample (the options are dpcm.ImportOptions; the defaults are the
+    composer's: rate 12, mixed to mono, normalized, level fitted) and print the report."""
+    name = a.id or dpcm.sample_name(f)
+    if name in pkg.samples and a.no_replace:
+        raise pk.PackageError("the package already has a sample '%s' (leave out --no-replace to replace it)" % name)
+    verb = "replaced" if name in pkg.samples else "added"
+    try:
+        opts = dpcm.options_from_args(a)
+        rate, x = dpcm.read_wav(f)
+        stats = {}
+        smp, notes = dpcm.convert_wav(x, rate, opts, name, stats)
+    except dpcm.DpcmError as e:
+        raise pk.PackageError("%s: %s" % (f, e))
+    pkg.samples[name] = smp
+    print("%s sample '%s' from %s" % (verb, name, f))
+    for line in dpcm.report_lines(smp, rate, len(x) / rate, stats, notes):
+        print("  " + line)
 
 
 def _head(f):
@@ -255,10 +287,17 @@ def import_goattracker(a, pkg, f, lib):
 
 def import_famistudio(a, pkg, f, lib):
     from .formats import famistudio_text as fam
-    text = Path(f).read_text(encoding="utf-8-sig")
-    if not fam.looks_like(text):
-        raise pk.PackageError("%s is not a FamiStudio text file (it should start with a Project line)" % f)
-    res = fam.load(text, song=a.song, region=a.region)
+    data = Path(f).read_bytes()
+    try:
+        if famistudio_binary.looks_like(data):                       # a .fms project, by its FMS! start
+            res = famistudio_binary.load(data, song=a.song, region=a.region)
+        else:
+            text = data.decode("utf-8-sig", errors="replace")
+            if not fam.looks_like(text):
+                raise pk.PackageError("%s is not a FamiStudio file (a .fms project starts with FMS!, a text export with a Project line)" % f)
+            res = fam.load(text, song=a.song, region=a.region)
+    except fam.FamiStudioError as e:
+        raise pk.PackageError("%s: %s" % (f, e))
     if a.id and len(res.songs) != 1:
         raise pk.PackageError("--id needs one song: the file has %d (pick one with --song)" % len(res.songs))
     stem = pk.Package.safe_id(Path(f).stem)
@@ -308,6 +347,7 @@ def export_cmd(args):
         if songs and a.midi:
             r = exporter.export_song(pkg, songs[0].name, a.o, fmt="mid", lib=lib)
             written = r.written
+            notes.extend(r.notes)
         elif a.o == "-":
             text = comp.song_to_mml(pkg, songs[0].name, notes)[0] if songs else comp.lib_to_mml(pkg, picked)[0]
             sys.stdout.write(text)
@@ -321,7 +361,9 @@ def export_cmd(args):
         d = Path(a.d)
         written = []
         for c in picked:
-            written.extend(exporter.export_song(pkg, c.name, d / (c.name + ".mid"), fmt="mid", lib=lib).written)
+            r = exporter.export_song(pkg, c.name, d / (c.name + ".mid"), fmt="mid", lib=lib)
+            written.extend(r.written)
+            notes.extend("%s: %s" % (c.name, n) for n in r.notes)
     else:
         written = comp.export_mml(pkg, picked, a.d, notes)
     for w in written:
@@ -345,7 +387,9 @@ def export_song_cmd(args):
     p.add_argument("--loops", type=int, default=0, metavar="N", help="(wav) trips round the loop after the first pass")
     p.add_argument("--tail", type=float, default=2.0, metavar="S", help="(wav) seconds to let the last notes ring (default 2)")
     p.add_argument("--region", choices=("ntsc", "pal"), default="ntsc", help="(famistudio) the frame rate the file is timed for (default ntsc)")
-    p.add_argument("--fs-version", metavar="X.Y.Z", default="4.5.3", help="(famistudio) the FamiStudio version the file says it is from (default 4.5.3)")
+    p.add_argument("--fs-version", metavar="X.Y.Z", default=exporter.DEFAULT_FS_VERSION,
+                   help="(famistudio) the version the file says it is from, or 'none' to leave the Version out (default %s)" % exporter.DEFAULT_FS_VERSION)
+    p.add_argument("--fs-reference", metavar="FILE", help="(famistudio) a text file exported by your own FamiStudio: its exact Version is used")
     add_library_options(p)
     a = p.parse_args(glue(args, "--volume", "--peak"))
     src, song = exporter.split_source(a.source)
@@ -356,7 +400,7 @@ def export_song_cmd(args):
     opts = exporter.AudioOptions(volume=exporter.gain(a.volume), normalize=a.normalize, peak_db=exporter.decibels(a.peak),
                                  start=exporter.frames(a.start), end=exporter.frames(a.end) if a.end else None,
                                  loops=a.loops, tail=a.tail)
-    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib, a.region, a.fs_version)
+    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib, a.region, a.fs_version, a.fs_reference)
     for w in r.written:
         print("wrote", w, *(["(%.2fs, peak %s)" % (r.seconds, "silent" if r.peak_db is None else "%.1f dBFS" % r.peak_db)]
                             if r.format == "wav" and w == r.path else []))
