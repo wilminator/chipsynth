@@ -315,7 +315,7 @@ Export (WAV, MIDI, MML, FamiStudio text, package copy), the same writers and imp
 Not built: simulating table-driven instruments with short per-frame notes (decision 2 above; the fit and the report come first);
 expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM; the importer skips their channels and reports them).
 
-**GoatTracker `.sng` import: slices 1 and 2 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
+**GoatTracker `.sng` import: slices 1, 2 and 3 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
 errors), the three voices as V1-V3, notes, rests, key-offs, order list repeat and transpose, the restart position as the loop point, tempo changes,
 and per instrument the ADSR, the first waveform and the starting pulse width. A frame is 4 ticks (4/N with multispeed N), so timing is exact at any speed.
 
@@ -329,14 +329,33 @@ subtunes). `--region` defaults to pal because the file does not say. The player'
 | pulse table: set rows (`0x8n`) and timed ramps (frames, signed speed) that rise and fall | `pws_from`, `pws_to`, `pws_rate` | run per frame to its repeat; a rise and a fall is a sweep, a ramp that jumps back or ends is played as a back-and-forth sweep (reported as approximate); only on a pulse wave |
 | speed table entry as vibrato, from pattern command 4 or the instrument's own pointer (which only works with a vibrato delay of 1 or more) | `vib_rate`, `vib_depth` on an instrument variant `NAME_vibR_D` | the swing is run per frame (the player's turn-around counter), its period gives the rate and its size against the note's SID frequency gives the depth, so a fixed entry is deeper on a low note; entries with the high bit set are relative to the note |
 
-Still reported, not carried over: wavetables with absolute notes (`0x81` and up), commands, waveform changes with no arpeggio, rows that play once before a loop, or no loop;
-pulse tables that zigzag or change width before setting one; filter tables; portamento, tone portamento and the other pattern commands; vibrato changed part-way through a note;
-vibrato delays (vibrato starts at once); vibrato of a speed entry that is missing, has speed 0 or is under 1/32 of a semitone.
 Vibrato is a triangle swing in the player and a sine in chipsynth, so it is always listed as approximate.
+
+**Slice 3 (branch `gt-commands`): the pattern commands, the rest of the wavetable and pulse idioms, and the filter.** A note that a command or
+table changes while it sounds is played as a run of chipsynth notes (one instrument per note), so each part strikes its envelope again; the Report says so.
+
+| command or table | becomes | approximate because |
+|---|---|---|
+| 1xy / 2xy portamento (speed = 16-bit speed table entry, left column high) | a one-frame note, then notes that glide (`Tweak slide`, at most 192/48 of a beat each) to the semitone the slide reaches; a later command, or 0, stops it and the pitch stays | a linear frequency slide is played as an exponential glide ending on a rounded semitone; the slide is taken to last until the next note or command |
+| 3xy tone portamento | the new note with a slide as long as the player needs to cover the distance from the voice's last pitch; 300 (tie note) is a plain new note | the held note is struck again; a slide over 192/48 of a beat arrives early |
+| 4xy vibrato on a row after the note | the note is split there, the second part with the vibrato variant (or none for 400) | struck again |
+| 5xy / 6xy set AD / SR | the instrument variant `NAME_adXY` / `NAME_srXY` for that note; the next note is the instrument again | a change on a row after the note is reported (it would change a sounding envelope) |
+| 7xy set waveform | a variant with that wave; ignored, as GoatTracker's own text says, while a wavetable is still running; on a later row it splits the note | combined waves become one wave; a silent or gate-off waveform ends the note |
+| 8xy / 9xy set wavetable / pulse pointer | the other table plays from that note (8xy also on a later row, splitting the note); 0 stops the table, and a stopped arpeggio or sweep is switched off in the variant | |
+| Axy, Bxy, Cxy and instrument filter tables | the filter is played for the whole song a frame at a time (mode, resonance, voice mask, cutoff); each note gets `filter`, and `fsweep` if the cutoff moves while it sounds | the SID filter is shared and chipsynth's is per note, so a note carries the filter as it is when it starts; the cutoff curve is chipsynth's; combined modes pick one; a sweep is a back-and-forth swing at the speed of its first rise or fall; a filter that changes mode or routing mid-note, or is switched on mid-note, is not followed |
+| Dxy master volume | a `Volume` event on all three voices | takes effect on the next note; D with a high digit (the timing mark) is ignored |
+| Exy funk tempo, F00 / F01 | row lengths alternate between the entry's two values on all channels; a tempo command ends it; F00 / F01 resume it (the loop point is found on the funk timeline) | what 00 and 01 recall is read from the command's description, not from the player |
+| wavetable with absolute notes (`0x81` and up), a pass before the loop, no loop, or waveform changes with no arpeggio | the table is run frame by frame for each note: a run of short notes (a noise hit, then the tone), then the endless tail as `arp` / `arprate` or a held note | arpeggio steps are limited to two octaves; a repeat that changes waveform plays its first step |
+| pulse table that changes the width before setting one | runs from 50% | the width the player had then is not in the file |
+| pulse table that zigzags | a cycle that is one sweep repeated is that sweep, exactly; an uneven zigzag (up to 8 peaks) is an even sweep between its lowest and highest width | uneven zigzags only |
+
+Still reported, not carried over: wavetables that run commands (rows `0xf0` and up; they are skipped for pointer commands and the instrument is left plain); pulse
+tables that drift or zigzag more than 8 times; a 5xy / 6xy or a tone portamento on a row after the note; a portamento on a note whose wavetable plays an arpeggio; a speed table entry
+that is missing (for portamento, funk tempo) or has speed 0 or is under 1/32 of a semitone (vibrato); vibrato delays (vibrato starts at once); a filter that is switched on part-way through a note.
 
 Fixed in slice 2: the song's bpm was multiplied by the multispeed, which played a multispeed song at N times its speed; it follows the video rate only (125 pal, 150 ntsc).
 Instrument names are made into identifiers (anything but letters, digits and `_` becomes `_`).
-Not built: a writer (GoatTracker `.sng` export); the rest of the pattern commands and the filter tables; the Furnace (`.fur`) importer (SID-Wizard: below). Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
+Not built: a writer (GoatTracker `.sng` export); the Furnace (`.fur`) importer (SID-Wizard: below). Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
 the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
 
 **SID Factory II `.sf2` import: slice 1 built.** `chipsynth/formats/sf2.py`; `python -m chipsynth import PKG.csp FILE.sf2 [--song N] [--region pal|ntsc] [--report FILE]`
@@ -407,3 +426,9 @@ Left out and reported: more voices, DACs, echo, reverb, detune, differences in n
 Two importer fixes came with it: the end of a song was found one frame late (the last note without a key-off was a frame too long), and an instrument's vibrato was lost on a row that had a tempo or other non-portamento command.
 **Not verified:** the files were read back by chipsynth's own importer only, never opened in a real GoatTracker; the tables and commands follow the same reading of `gplay.c` the importer does. In particular unchecked: that a tempo command takes effect on its own row (the groove depends on it; `--gt-tempo speed` does not),
 that wavetable right column `0x80` ("no change") and `0x00` (+0) behave as assumed, that relative notes cannot go below the note (an arpeggio below it is written lower and counted up), and the pulse speed range. Not built: the filter (as a filter table), slides (as portamento), volume (as sustain), stereo (two SIDs).
+Slice 3 was written without the player source in reach (`gplay.c` could not be fetched from the environment it was built in): the command descriptions come from GoatTracker's published command list,
+the table and frame behaviour from slice 2's reading of the player, and the rest from memory. **To check against `gplay.c`:** that a command (portamento, vibrato) stays in force until a later command or note
+(taken here: until the next note or a later row with a command); the speed table's 16-bit speed (left column as the high byte); the filter table row layout (`0x80`+type bits and resonance / voice mask, `0x00` set cutoff, `0x01`-`0x7f`
+time and signed speed); that a relative wavetable note wraps in 7 bits (`(note + right) & 0x7f`, so `0x7f` is one below); that a waveform row with the gate bit off or `0xe0`-`0xef` is silence or a release;
+what F00 / F01 recall; that one-shot commands (5xy - Fxy) leave the instrument's vibrato alone; the cutoff to Hz curve (30 Hz + 46 Hz a step); and that the pulse width before a table sets one is not kept from the note before.
+Filter and master volume are heard as chipsynth's per-note filter and per-note volume, not as the chip's.
