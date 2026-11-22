@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Michael Allen Wilmes
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mid, mml, csp, FamiStudio text or GoatTracker 2.
+"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mid, mml, csp, famistudio, famitracker or goattracker.
+(A plain .txt is FamiStudio's text format; FamiTracker's ends in .ftm.txt or is asked for with fmt="famitracker".)
 
     pkg = open_source("music/forest.csp")
     r = export_song(pkg, "dawn", "dawn.wav", AudioOptions(volume=0.8, normalize=True, start=frames("2s"), loops=1))
@@ -27,9 +28,11 @@ from .player import TunePlayer
 from .song import Song
 from .synth import RATE, to_pcm16
 
-FORMATS = ("wav", "mid", "mml", "csp", "famistudio", "goattracker")
+FORMATS = ("wav", "mid", "mml", "csp", "famistudio", "famitracker", "goattracker")
 SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp", ".txt": "famistudio", ".sng": "goattracker"}
 
+
+FAMITRACKER_ENDING = ".ftm.txt"                  # a plain .txt is FamiStudio's own text format: this one is FamiTracker's
 
 DEFAULT_FS_VERSION = famistudio_export.DEFAULT_VERSION
 
@@ -210,9 +213,12 @@ def format_of(path, fmt=None):
         if fmt.lower() not in FORMATS:
             raise ExportError("unknown format '%s' (formats: %s)" % (fmt, ", ".join(FORMATS)))
         return fmt.lower()
+    if str(path).lower().endswith(FAMITRACKER_ENDING):
+        return "famitracker"
     f = SUFFIXES.get(Path(path).suffix.lower())
     if not f:
-        raise ExportError("can't tell the format from '%s'; end it in %s or give --format" % (path, ", ".join(SUFFIXES)))
+        raise ExportError("can't tell the format from '%s'; end it in %s or %s, or give --format"
+                          % (path, ", ".join(SUFFIXES), FAMITRACKER_ENDING))
     return f
 
 
@@ -237,7 +243,7 @@ def fs_stamp(version=DEFAULT_FS_VERSION, reference=None):
 
 def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region=None, fs_version=DEFAULT_FS_VERSION, fs_reference=None,
                 multispeed=1, gt_tempo="exact"):
-    """Write song `song_id` of `pkg` to `path` as wav, mid, mml, csp, famistudio or goattracker (see the module doc).  Returns a Result.
+    """Write song `song_id` of `pkg` to `path` as wav, mid, mml, csp, famistudio, famitracker or goattracker (see the module doc).  Returns a Result.
     FamiStudio: `fs_version` is the Version stamp (None or "none": leave it out); `fs_reference` is a text file the
     author's own FamiStudio wrote, whose exact Version is used instead (see fs_stamp).
     `region` is ntsc or pal for the two tracker formats (default: ntsc for FamiStudio, pal for GoatTracker, as its importer);
@@ -277,6 +283,13 @@ def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region=None, 
                 raise ExportError(str(e))
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
+            r.written = [path]
+            r.notes += rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
+        elif fmt == "famitracker":
+            from .formats import famitracker_export
+            text, rep = famitracker_export.dump(pkg.tune(song_id, lib), region, name=song_id if not pkg.songs[song_id].title else None)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8", newline="\n")
             r.written = [path]
             r.notes += rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
         elif fmt == "mml":

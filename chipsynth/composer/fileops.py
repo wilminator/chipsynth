@@ -33,6 +33,7 @@ EXPORTS = {
     "mml": ("MML text...", "Export MML", "*.mml", ".mml"),
     "famistudio": ("FamiStudio text (.txt)...", "Export FamiStudio text", "*.txt", ".txt"),
     "goattracker": ("GoatTracker 2 (.sng)...", "Export GoatTracker song", "*.sng", ".sng"),
+    "famitracker": ("FamiTracker text (.ftm.txt)...", "Export FamiTracker text", "*.txt", ".ftm.txt"),
     "csp": ("Package copy (.csp)...", "Export a one-song package", "*.csp", ".csp"),
 }
 

@@ -438,6 +438,12 @@ class FileMenu:
                                    "with another version than its own: Reference file takes the Version from a file your FamiStudio exported.",
                               apply=self.export_famistudio_stamped)
             return True
+        if fmt == "famitracker":
+            self.show_options("Export FamiTracker text",
+                              [("region", "Timing", [("ntsc", "NTSC"), ("pal", "PAL")], 0)],
+                              ok="Choose file...", note="V1-V4 and one DPCM track only; what is left out is reported.",
+                              apply=lambda v: self.export_choose(fmt, **v))
+            return True
         if fmt == "goattracker":
             self.show_options("Export GoatTracker song",
                               [("region", "Timing", [("pal", "PAL (50 Hz)"), ("ntsc", "NTSC (60 Hz)")], 0),
@@ -492,7 +498,7 @@ class FileMenu:
 
     def export_as(self, fmt, path, loops=0, normalize=False, part="song", region=None,
                   fs_version=exporter.DEFAULT_FS_VERSION, fs_reference=None, multispeed=1, gt_tempo="exact"):
-        """Write the open song to `path` as wav, mid, mml, famistudio, goattracker or csp with exporter.export_song, the code
+        """Write the open song to `path` as wav, mid, mml, famistudio, famitracker, goattracker or csp with exporter.export_song, the code
         `python -m chipsynth export-song` runs.  A file it replaces is copied to backups first.  Returns True."""
         if self.song is None:
             self.say("There is no song to export.", 3.0)
@@ -519,7 +525,7 @@ class FileMenu:
             self.say("Can't export %s: %s" % (path.name, e), 8.0)
             return False
         lines = list(r.notes)
-        if fmt not in ("famistudio", "goattracker"):     # only the tracker formats' notes include plain facts
+        if fmt not in ("famistudio", "famitracker", "goattracker"):     # only the tracker formats' notes include plain facts
             lines = ["warning: " + x for x in lines]
         else:
             lines = [x if x.startswith(WARNING) else "note: " + x for x in lines]
