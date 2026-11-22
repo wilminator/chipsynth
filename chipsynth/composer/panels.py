@@ -367,7 +367,10 @@ def tracker(app):
     pygame.draw.rect(surf, th["panel"], (g["x"], g["y"], g["w"], g["head"]))
     pygame.draw.line(surf, th["line"], (g["x"], g["y"] + g["head"] - 1), (g["x"] + g["w"], g["y"] + g["head"] - 1))
     text(surf, f.small, "%s rows" % M.SNAPS[app.snap_i][0], (g["x"] + 6, g["y"] + g["head"] * 3 // 10), th["dim"], "ml")
-    text(surf, f.small, "Octave %d" % cur.octave, (g["x"] + 6, g["y"] + g["head"] * 7 // 10), th["accent"], "ml")
+    if cur.vol_entry is not None:
+        text(surf, f.small, "Volume %s_" % cur.vol_entry, (g["x"] + 6, g["y"] + g["head"] * 7 // 10), th["accent"], "ml")
+    else:
+        text(surf, f.small, "Octave %d" % cur.octave, (g["x"] + 6, g["y"] + g["head"] * 7 // 10), th["accent"], "ml")
     if ui.hover((g["x"], g["y"], g["rn"], g["head"])):
         ui.tip = "The octave the piano keys type in: - / + or Shift+Up / Shift+Down"
     left = cur.left
@@ -380,6 +383,7 @@ def tracker(app):
     first, count = cur.top, g["visible"]
     cells = [TR.column_cells(rl, c, rt, first, count) for c in range(rl.lanes)]
     extras = [TR.row_notes(rl, c, rt, first, count) for c in range(rl.lanes)]
+    defaults = [TR.voice_default(rl, c) for c in range(rl.lanes)]      # a note with its voice's usual volume is drawn dim
     tick = app.playhead()
     play_row = None if tick is None else int(tick // rt)
     bt = rl.bar_ticks
@@ -416,7 +420,7 @@ def tracker(app):
                     mark = EFFECT_MARK.get(nt.fx, "")
                     text(surf, f.mono, label, (cx + 6, ry + g["row_h"] // 2), col, "ml", g["cw"] // 3)
                     text(surf, f.mono, "v%d" % nt.vol, (cx + g["cw"] * 5 // 9, ry + g["row_h"] // 2),
-                         mix(th["dim"], bg, 0.15 if nt.vol != 15 else 0.6), "ml", g["cw"] // 4)
+                         mix(th["dim"], bg, 0.15 if nt.vol != defaults[c] else 0.6), "ml", g["cw"] // 4)
                     if mark:
                         text(surf, f.mono, mark, (cx + g["cw"] - 6, ry + g["row_h"] // 2), th["accent"], "mr", g["cw"] // 5)
     for c in range(1, len(shown) + 1):
@@ -440,7 +444,7 @@ def tracker(app):
             ui.tip = "Tracks off screen: drag, or Shift+wheel, or the left / right arrows"
     if ui.hover((g["x"], g["rows_y"], g["w"], g["h"] - g["head"])):
         ui.tip = ("Type notes on the keys z s x d c v ... (piano layout), - / + octave, Delete erases, Enter places a drum sample, "
-                  ", / . volume (Shift: bigger steps), ; effect")
+                  ", / . volume (Shift: bigger steps), / then digits types a volume, ; effect")
     surf.set_clip(None)
 
 
@@ -1549,6 +1553,7 @@ HELP = (
     ("Arrows", "scroll (Shift for bigger steps); in Tracks, Up / Down pick the track above / below"), ("Middle drag", "pan"),
     ("Tracker keys", "z s x d c v ... and q 2 w 3 e ... are a piano; - / + octave"),
     ("Tracker , / .", "volume of the note at the cursor, down / up (Shift: by 4)"),
+    ("Tracker /", "type the volume of the note at the cursor: 0-9, or 1 then 0-5; Enter sets, Esc cancels"),
     ("Tracker ; / :", "effect of the note at the cursor: next / previous (~ vibrato, / slide, ^ arpeggio)"),
     ("Tab", "switch between Tracks, the piano roll and the tracker"),
     ("Click ruler", "set where Play starts"), ("Click a note", "select it (the inspector shows it)"),
@@ -1561,7 +1566,7 @@ HELP = (
     ("Q", "snap the selected notes to the grid"), ("Ctrl+E", "export a MIDI file (drop a .mid to import one)"), ("Drag a note", "move it; drag its right end to resize"),
     ("File / F10", "the File menu: New, Open, Save, Import, Export"),
     ("Menu keys", "Up / Down pick, Right / Left open or close Import / Export, Enter runs"),
-    ("Drop .sng/.txt", "import a GoatTracker song / FamiStudio text"),
+    ("Drop .sng/.txt/.fms", "import a GoatTracker song / FamiStudio text or project"),
     ("Drum lanes", "click D1 / D2 to place the picked sample; drag to move"),
     ("Drop a .wav", "import it as a drum sample"),
     ("Delete", "erase the selected note or drum hit"), ("Arrows (note)", "with a note picked: nudge it (Shift = octave)"),

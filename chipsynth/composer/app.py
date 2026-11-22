@@ -56,6 +56,9 @@ class NullOut:
         return self.player
 
 
+TR_DIGITS = {**{getattr(pygame, "K_%d" % d): d for d in range(10)}, **{getattr(pygame, "K_KP%d" % d): d for d in range(10)}}
+
+
 class Composer(FileMenu):
     def __init__(self, screen, prefs=None, packages=None, lib=None, out=None, prefs_path=None, root=None):
         self.screen = screen
@@ -289,7 +292,13 @@ class Composer(FileMenu):
                 song = midi.from_midi(p.read_bytes())
                 self.say("Imported %s: %d voice%s%s. Save to keep it." % (p.name, song.voices, "" if song.voices == 1 else "s",
                          "; " + song.warnings[0] if song.warnings else ""), 8.0)
-                return self.load_song(song, p.stem, "")
+                ok = self.load_song(song, p.stem, "")
+                if ok and song.warnings:                      # what was folded or left out (drums the kit cannot play...)
+                    self.show_report("Import of %s" % p.name, ["warning: " + w for w in song.warnings],
+                                     "Imported %s: %d voice%s, %d warning%s. Save to keep it."
+                                     % (p.name, song.voices, "" if song.voices == 1 else "s", len(song.warnings),
+                                        "" if len(song.warnings) == 1 else "s"))
+                return ok
             text = p.read_text(encoding="utf-8", errors="replace")
             song = Song.from_mml(text, self.lib)
             return self.load_song(song, song.title or p.stem, str(p))
@@ -492,10 +501,8 @@ class Composer(FileMenu):
         elif t == pygame.KEYDOWN:
             self.on_key(e)
         elif t == getattr(pygame, "DROPFILE", -1):
-            if str(e.file).lower().endswith(".wav"):
-                self.import_wav(e.file)
-            elif str(e.file).lower().endswith((".sng", ".txt")):
-                self.import_begin(e.file)                  # GoatTracker / FamiStudio: asks for the options it needs
+            if str(e.file).lower().endswith((".wav", ".sng", ".txt", ".fms")):
+                self.import_begin(e.file)                  # WAV / GoatTracker / FamiStudio: asks for the options it needs
             else:
                 self.open_path(e.file)
 
@@ -730,7 +737,9 @@ class Composer(FileMenu):
                 self.prompt["text"] += e.unicode
             return
         if k == pygame.K_ESCAPE:
-            if self.overlay:
+            if self.tr.vol_entry is not None:
+                self.tr.vol_entry = None
+            elif self.overlay:
                 self.overlay = None
             else:
                 self.note_sel = self.hit_sel = None
@@ -1007,6 +1016,7 @@ class Composer(FileMenu):
         self.prefs.view = mode
         self.dirty = True
         self.drag = None
+        self.tr.vol_entry = None
         self.relayout()
         if mode == "tracker":
             self.tr.col = min(self.sel_voice, self.roll.lanes - 1)
@@ -1034,6 +1044,7 @@ class Composer(FileMenu):
         c.left = max(0, min(c.left, max(0, (self.roll.lanes if self.roll else 1) - g["cols"])))
 
     def tracker_down(self, pos):
+        self.tr.vol_entry = None
         g = panels.tracker_geo(self)
         x, y = pos
         if g["hbar"] and L.contains(g["hbar"], x, y):
@@ -1082,6 +1093,8 @@ class Composer(FileMenu):
         n = TR.total_rows(self.roll, rt)
         page = max(1, self.roll.bar_ticks // rt)
         moved = True
+        if c.vol_entry is not None:
+            return self.tracker_volume_key(e)
         if k == pygame.K_UP and mods & pygame.KMOD_SHIFT:
             c.octave = min(8, c.octave + 1)
             self.say("Octave %d" % c.octave, 1.5)
@@ -1119,6 +1132,11 @@ class Composer(FileMenu):
         elif k in (pygame.K_COMMA, pygame.K_PERIOD) and not mods & pygame.KMOD_CTRL:
             self.tracker_volume((1 if k == pygame.K_PERIOD else -1) * (4 if mods & pygame.KMOD_SHIFT else 1))
             return True
+        elif k == pygame.K_SLASH and not mods & (pygame.KMOD_CTRL | pygame.KMOD_SHIFT):
+            if self.tracker_note() is not None:
+                c.vol_entry = ""
+                self.say("Volume: type 0-9 (or 1 then 0-5 for 10-15), Enter sets, Esc cancels.", 4.0)
+            return True
         elif k == pygame.K_SEMICOLON:
             self.tracker_effect(-1 if mods & pygame.KMOD_SHIFT else 1)
             return True
@@ -1152,6 +1170,38 @@ class Composer(FileMenu):
             self.say("No note here.", 1.5)
             return None
         return c.col, self.roll.notes[c.col][i].start
+
+    def tracker_volume_key(self, e):
+        """A key while a volume is being typed (after `/`): digits, Enter, Backspace; anything else cancels."""
+        c, k = self.tr, e.key
+        digit = TR_DIGITS.get(k)
+        if digit is not None:
+            c.vol_entry, done = TR.type_volume(c.vol_entry, digit)
+            if done:
+                self.tracker_set_volume(TR.entry_volume(c.vol_entry))
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            vol = TR.entry_volume(c.vol_entry)
+            if vol is None:
+                c.vol_entry = None
+            else:
+                self.tracker_set_volume(vol)
+        elif k == pygame.K_BACKSPACE:
+            c.vol_entry = c.vol_entry[:-1]
+        else:
+            c.vol_entry = None                      # any other key: give up, and swallow it
+        return True
+
+    def tracker_set_volume(self, vol):
+        """Finish a typed volume: give the note at the cursor that volume (one undo step) and leave typing mode."""
+        self.tr.vol_entry = None
+        at = self.tracker_note()
+        if at is None:
+            return
+        v, start = at
+        if self.tune.voices[v][self.ed.find(v, start)].vol == vol:
+            return
+        if self.edit(lambda: self.ed.set_volume(v, self.ed.find(v, start), vol), None):
+            self.say("Volume %d" % vol, 1.5)
 
     def tracker_volume(self, delta):
         at = self.tracker_note()
@@ -1305,17 +1355,19 @@ class Composer(FileMenu):
         return bool(path) and self.export_midi(path)
 
     def export_midi(self, path):
-        """Write the song as a standard MIDI file (voices only; drums are left out)."""
+        """Write the song as a standard MIDI file (voices, and the kit drums of D1 / D2 as channel 10)."""
         if self.song is None:
             return False
         path = Path(path)
         try:
             from .files import save_with_backup
-            save_with_backup(self.root or path.parent, path, midi.to_midi(self.ed.tune))
+            tune = self.ed.tune
+            save_with_backup(self.root or path.parent, path, midi.to_midi(tune))
         except OSError as e:
             self.say("Can't write %s: %s" % (path.name, e), 8.0)
             return False
-        self.say("Exported %s (the four voices; drums are not included)." % path.name, 5.0)
+        left = midi.drum_hits(tune)[1]
+        self.say("Exported %s (the voices and the kit drums as channel 10)%s." % (path.name, "; " + left[0] if left else ""), 6.0)
         return True
 
     def ask(self, label, text, apply):
@@ -1681,15 +1733,20 @@ class Composer(FileMenu):
         self.stop()
         self.out.start(tune, loop=False)
 
-    def import_wav(self, path, name=None, rate=12):
-        """Convert a WAV file to a drum sample and make it available as `name` (default: the file name)."""
+    def import_wav(self, path, name=None, rate=12, options=None):
+        """Convert a WAV file to a drum sample and make it available as `name` (default: the file name).
+        `options` is a dpcm.ImportOptions (the File > Import dialog builds one); without it the import is what it always
+        was: rate `rate` (12), channels mixed, normalized, level fitted.  Says what it made (rate, length, bytes,
+        clipping) in the status line and the Last report."""
         if self.ed is None:
             return False
         path = Path(path)
+        opts = options or dpcm.ImportOptions(rate=rate, fit=True)
+        stats = {}
         try:
             sr, x = dpcm.read_wav(path)
-            name = name or re.sub(r"[^A-Za-z_]", "_", path.stem) or "sample"
-            smp = dpcm.convert(x, sr, rate=rate, name=name, fit=True)
+            name = name or dpcm.sample_name(path)
+            smp, notes = dpcm.convert_wav(x, sr, opts, name, stats)
         except dpcm.DpcmError as e:
             self.say("Can't import %s: %s" % (path.name, e), 8.0)
             return False
@@ -1702,10 +1759,15 @@ class Composer(FileMenu):
         self.imported[name] = smp
         self.sample_name = name
         self.sel_voice = self.roll.nv if self.sel_voice < self.roll.nv and self.roll.nd else self.sel_voice
-        self.say("Imported %s: %.2f s, %d bytes. Click a drum lane to place it." % (name, smp.seconds, smp.size), 6.0)
+        summary = "Imported %s: %.2f s, %d bytes. Click a drum lane to place it." % (name, smp.seconds, smp.size)
+        if stats.get("clipped"):
+            summary = "Imported %s: %.2f s, %d bytes, CLIPPING (%d samples). " % (name, smp.seconds, smp.size, stats["clipped"]) \
+                      + "Lower the gain."
+        self.show_report("Import %s" % path.name, dpcm.report_lines(smp, sr, len(x) / sr, stats, notes), summary)
         return True
 
     def import_dialog(self):
+        path = ""
         try:
             import tkinter
             from tkinter import filedialog
@@ -1713,10 +1775,10 @@ class Composer(FileMenu):
             root.withdraw()
             path = filedialog.askopenfilename(title="Import a sample", filetypes=[("WAV files", "*.wav"), ("All files", "*.*")])
             root.destroy()
-            if path:
-                self.import_wav(path)
         except Exception:
             self.say("No file dialog here: drag a .wav file onto the window.")
+        if path:
+            self.import_begin(path, "wav")
 
     # ------------------------------------------------------------ saving
     def request_quit(self):
