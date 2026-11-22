@@ -32,7 +32,7 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `synth.py`, `synthfx.py` | the voices, envelopes, effects, filter; the shared echo and reverb bus |
 | `dpcm.py` | WAV to NES-style delta samples, the `.dpcm` file format (`python -m chipsynth.dpcm demo|convert`) |
 | `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report; `formats.goattracker.load(bytes)` likewise |
-| `midi.py` | Standard MIDI files: `to_midi(tune)`, `from_midi(bytes, voices=None)` -> Song (a voice per part, up to 16; `voices=N` folds the rest into gaps; channel 10 drums go to D1 / D2) |
+| `midi.py` | Standard MIDI files: `to_midi(tune)`, `from_midi(bytes, voices=None, drum_lanes="auto")` -> Song (a voice per part, up to 16; `voices=N` folds the rest into gaps; channel 10 drums go to D1 / D2, and to D3-D8 when hits fall together) |
 | `songedit.py` | `Editor`: note-level edits of a Song (add, erase, pitch, resize, move) with undo / redo |
 | `song.py`, `songmml.py` | the `Song` model (clips, repeats, calls kept as objects), `Song.compile()` to a `Tune`, MML import / export: `Song.from_mml(text)`, `song.to_mml()` |
 | `package.py`, `packageset.py`, `packagetext.py` | the `.csp` package file (several songs + shared instruments / samples), `PackageSet` (load many, pick `package:song`), text dump / build |
@@ -128,12 +128,28 @@ every line (a clean conversion needs no window). Dropping a `.sng`, `.txt`, `.fm
   a `.csp` file, else `NAME.csp` beside the imported file (an existing file keeps its other songs, and the same ids are
   replaced, with a copy of the old file in `backups/`). The first of them opens. The options window says where they go.
 * **MIDI drums** (channel 10, General MIDI percussion) import onto the DAC lanes: kick, snare, hats, crash and toms play the
-  built-in kit samples (the note-to-sample table is `GM_DRUMS` in `chipsynth/midi.py`), velocity is the volume, kick / snare /
-  toms go on D1 and hats / crash on D2, and when two hits fall on the same moment the stronger keeps its lane and the other
-  moves to the free lane. Percussion the kit has no sample for (cowbell, congas, ...) and hits that fit on neither lane are
-  listed in the import report (in `python -m chipsynth import` as `warning:` lines), never dropped silently. Export writes
-  the kit hits of D1 / D2 as channel 10 notes (the shouted "hey", the pitched bass and your own samples have no MIDI drum
-  note and are reported as left out), so a round trip keeps the drums. A file without percussion imports exactly as before.
+  built-in kit samples (the note-to-sample table is `GM_DRUMS` in `chipsynth/midi.py`) and velocity is the volume. Kick /
+  snare / toms prefer D1 and hats / crash D2, and when two hits fall on the same moment (the same 1/32 grid step) the
+  stronger keeps its lane and the other moves to the free one. General MIDI drums are polyphonic, so a third, fourth, ...
+  simultaneous hit goes to D3, D4, ... (the lowest free lane, in the order kit priority sorts them) up to D8. The **Drum
+  lanes** option decides how far that goes: **Auto** (the default) uses as many lanes as the file's busiest moment needs
+  and writes `dacs N` in the song; a number from 2 to 8 allows at most that many. A file whose drums never need more
+  than two lanes imports exactly as it always did (no `dacs` line). Percussion the kit has no sample for (cowbell,
+  congas, ...) and hits that fit on no allowed lane are listed in the import report (in `python -m chipsynth import` as
+  `warning:` lines), never dropped silently, and a `drums:` line says how many lanes were used. The composer asks for the
+  Drum lanes (a row in the options window, like the other imports) when you Import > MIDI, Open a `.mid` or drop one on
+  the window and the file has percussion; a file without drums opens at once. Export writes the kit hits of every DAC lane
+  (D1 to D8) as channel 10 notes, simultaneous ones as several notes at one tick (the shouted "hey", the pitched bass and
+  your own samples have no MIDI drum note and are reported as left out), so a round trip keeps the drums. A file without
+  percussion imports exactly as before.
+
+  ```
+  python -m chipsynth import PKG.csp FILE.mid --drum-lanes auto
+  python -m chipsynth import PKG.csp FILE.mid --drum-lanes 4
+  ```
+
+  A song with more than two DAC lanes plays and renders (WAV, MIDI) normally and the roll and tracker show every lane. The
+  FamiStudio export has one DPCM channel, so it keeps D1 and reports `DAC tracks D2 and up` as left out.
 * Anything that would replace the open song (New, Open, Import) first asks about unsaved edits: Save, Don't save, Cancel.
 * Import MML makes an unsaved copy (Open edits the file itself). Export over an existing file keeps a copy in `backups/`.
 

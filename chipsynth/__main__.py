@@ -20,6 +20,8 @@
                                     --samples DIR where NAME.dpcm files for [sample] are
                                     --no-replace  refuse a song id that is already in the package
                                     --voices N    (MIDI) make songs of N voices; the others' notes fill the gaps
+                                    --drum-lanes auto|N   (MIDI) DAC lanes for the channel 10 drums: auto (default)
+                                                  uses as many as the file needs (2-8), N allows at most N
                                     --song NAME   (FamiStudio) only this song (a name or a number); --region ntsc|pal
                                                   (GoatTracker: --song N is the subtune, --region pal|ntsc defaults to pal,
                                                   --multispeed 1|2|4, --report FILE; the file records none of these)
@@ -170,6 +172,9 @@ def import_cmd(args):
     p.add_argument("--voices", type=int, metavar="N",
                    help="(MIDI) make songs of N voices: the most important parts stay and the others' notes fill their gaps "
                         "(default: a voice for every part, up to 16)")
+    p.add_argument("--drum-lanes", metavar="auto|N", default="auto",
+                   help="(MIDI) DAC lanes for the percussion: auto (default) uses as many as the file's simultaneous hits need, "
+                        "up to 8; a number 2-8 allows at most that many and hits that do not fit are reported")
     p.add_argument("--song", metavar="NAME", help="(FamiStudio) import only this song, by name or number; (GoatTracker) only this "
                                                   "subtune, by number (default: every song)")
     p.add_argument("--region", choices=("ntsc", "pal"), help="(FamiStudio) the timing to use (default: what the file says); "
@@ -209,9 +214,17 @@ def import_cmd(args):
             raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
         verb = "replaced" if sid in pkg.songs else "added"
         if is_midi:
-            msong = midi.from_midi(Path(f).read_bytes(), voices=a.voices)
+            info = []
+            try:
+                msong = midi.from_midi(Path(f).read_bytes(), voices=a.voices, drum_lanes=a.drum_lanes, info=info)
+            except ValueError as e:
+                if isinstance(e, midi.MidiError):
+                    raise
+                raise pk.PackageError("--drum-lanes: %s" % e)
             for w in msong.warnings:
                 print("warning:", w)
+            for line in info:
+                print(line)
             pkg.add_song(sid, msong, lib)
         else:
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, song_id=sid)

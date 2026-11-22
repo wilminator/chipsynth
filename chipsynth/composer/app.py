@@ -274,9 +274,9 @@ class Composer(FileMenu):
         ref = next((r for r in self.packages.songs() if r.id == song_id), None)
         return self.load_song(song, ref.title if ref else song_id, ref.path if ref else "", song_id)
 
-    def open_path(self, path, guard=True):
+    def open_path(self, path, guard=True, drum_lanes="auto"):
         if guard and self.song_dirty:
-            return self.guard_switch(lambda: self.open_path(path, guard=False))
+            return self.guard_switch(lambda: self.open_path(path, guard=False, drum_lanes=drum_lanes))
         p = Path(path)
         try:
             if p.suffix.lower() == ".csp":
@@ -289,20 +289,23 @@ class Composer(FileMenu):
                 ids = [r.id for r in self.packages.songs() if r.package == name]
                 return bool(ids) and self.open_song_id(ids[0], guard=False)
             if p.suffix.lower() in (".mid", ".midi"):
-                song = midi.from_midi(p.read_bytes())
+                info = []
+                song = midi.from_midi(p.read_bytes(), drum_lanes=drum_lanes, info=info)
                 self.say("Imported %s: %d voice%s%s. Save to keep it." % (p.name, song.voices, "" if song.voices == 1 else "s",
                          "; " + song.warnings[0] if song.warnings else ""), 8.0)
                 ok = self.load_song(song, p.stem, "")
-                if ok and song.warnings:                      # what was folded or left out (drums the kit cannot play...)
-                    self.show_report("Import of %s" % p.name, ["warning: " + w for w in song.warnings],
-                                     "Imported %s: %d voice%s, %d warning%s. Save to keep it."
-                                     % (p.name, song.voices, "" if song.voices == 1 else "s", len(song.warnings),
-                                        "" if len(song.warnings) == 1 else "s"))
+                if ok and (song.warnings or info):            # what was folded or left out, and the drum lanes used
+                    self.show_report("Import of %s" % p.name, ["warning: " + w for w in song.warnings] + info,
+                                     "Imported %s: %d voice%s%s%s. Save to keep it."
+                                     % (p.name, song.voices, "" if song.voices == 1 else "s",
+                                        ", " + info[0] if info else "",
+                                        ", %d warning%s" % (len(song.warnings), "" if len(song.warnings) == 1 else "s")
+                                        if song.warnings else ""))
                 return ok
             text = p.read_text(encoding="utf-8", errors="replace")
             song = Song.from_mml(text, self.lib)
             return self.load_song(song, song.title or p.stem, str(p))
-        except (PackageError, mml.MMLError, midi.MidiError, OSError) as e:
+        except (PackageError, mml.MMLError, midi.MidiError, OSError, ValueError) as e:
             self.say("Can't open %s: %s" % (p.name, e))
             return False
 
@@ -504,7 +507,7 @@ class Composer(FileMenu):
             if str(e.file).lower().endswith((".wav", ".sng", ".txt", ".fms")):
                 self.import_begin(e.file)                  # WAV / GoatTracker / FamiStudio: asks for the options it needs
             else:
-                self.open_path(e.file)
+                self.open_begin(e.file)
 
     def in_grid(self, pos):
         return self.roll is not None and L.contains(self.geo["grid"], *pos)
@@ -886,7 +889,7 @@ class Composer(FileMenu):
             path = filedialog.askopenfilename(title="Open a song", filetypes=[("Songs", "*.mml *.csp *.mid *.midi"), ("All files", "*.*")])
             root.destroy()
             if path:
-                self.open_path(path)
+                self.open_begin(path)
         except Exception:
             self.say("No file dialog here: drag a .mml or .csp file onto the window, or pick from Songs.")
 
@@ -1355,7 +1358,7 @@ class Composer(FileMenu):
         return bool(path) and self.export_midi(path)
 
     def export_midi(self, path):
-        """Write the song as a standard MIDI file (voices, and the kit drums of D1 / D2 as channel 10)."""
+        """Write the song as a standard MIDI file (voices, and the kit drums of every DAC lane as channel 10)."""
         if self.song is None:
             return False
         path = Path(path)

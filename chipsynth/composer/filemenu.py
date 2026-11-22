@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pygame
 
-from chipsynth import dpcm, exporter, mml, package as pk
+from chipsynth import dpcm, exporter, midi, mml, package as pk
 from chipsynth.package import PackageError
 from chipsynth.song import Song, SongError
 from chipsynth.synth import DPCM_RATES, RATE
@@ -225,6 +225,8 @@ class FileMenu:
             return False
         if kind == "wav":
             return self.import_wav_options(path)
+        if kind == "mid":
+            return self.open_begin(path)
         if not (fo.is_famistudio(kind) or kind == "goattracker"):
             return self.import_file(path, kind)
         try:
@@ -254,6 +256,26 @@ class FileMenu:
         self.show_options("Import %s" % Path(path).name, rows, ok="Import", note=note, apply=lambda v: self.import_file(
             path, kind, region=v["region"], multispeed=v.get("multispeed", 1), song=v["song"] or None))
         return True
+
+    def open_begin(self, path):
+        """Open a file (dialog or drop).  A MIDI file with percussion asks how many DAC lanes the drums may use first
+        (Auto, or 2-8); every other file opens at once."""
+        p = Path(path)
+        if p.suffix.lower() in (".mid", ".midi") and self.midi_has_drums(p):
+            rows = [("drum_lanes", "Drum lanes", [("auto", "Auto: as many as the drums need")] + [(n, str(n)) for n in range(2, 9)], 0)]
+            note = ("General MIDI drums can hit together. Auto gives each simultaneous hit its own lane (D1 to D8) and a file "
+                    "that never needs more than two lanes imports exactly as with 2; a smaller number lists the hits that do not fit.")
+            self.show_options("Open %s" % p.name, rows, ok="Open", note=note,
+                              apply=lambda v: self.import_file(p, "mid", drum_lanes=v["drum_lanes"]))
+            return True
+        return self.open_path(p)
+
+    @staticmethod
+    def midi_has_drums(path):
+        try:
+            return midi.has_drums(Path(path).read_bytes())
+        except (OSError, midi.MidiError):
+            return False
 
     def import_wav_options(self, path):
         """Import > WAV: the options dialog (channel, DAC rate, trim, normalize, gain, level fit), then import_wav.
@@ -292,7 +314,7 @@ class FileMenu:
         """Where several imported songs go: the open package, else NAME.csp beside the imported file."""
         return self.package_path() or Path(path).with_suffix(".csp")
 
-    def import_file(self, path, kind=None, region=None, multispeed=1, song=None, package=None, guard=True):
+    def import_file(self, path, kind=None, region=None, multispeed=1, song=None, package=None, guard=True, drum_lanes="auto"):
         """Import a file of any kind the File menu knows (see the module doc).  Returns True when it came in.
         `song` picks one song of a multi-song file; `package` is the .csp several songs go to."""
         path = Path(path)
@@ -300,7 +322,7 @@ class FileMenu:
         if kind == "wav":
             return self.import_wav(path)
         if kind == "mid":
-            return self.open_path(path, guard=guard)
+            return self.open_path(path, guard=guard, drum_lanes=drum_lanes)
         if kind == "mml":
             return self.import_mml(path, guard)
         if not (fo.is_famistudio(kind) or kind == "goattracker"):
