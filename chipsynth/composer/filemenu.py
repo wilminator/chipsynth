@@ -419,8 +419,6 @@ class FileMenu:
             lines = ["warning: " + x for x in lines]
         else:
             lines = [x if x.startswith(WARNING) else "note: " + x for x in lines]
-        if fmt == "mid" and self.roll is not None and any(self.roll.dac):
-            lines.append("left out: the drum / sample lanes (D1, D2) are not in a MIDI file")
         lines = extra + lines
         what = "Exported %s" % path.name
         if fmt == "wav":

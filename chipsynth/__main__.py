@@ -200,7 +200,10 @@ def import_cmd(args):
             raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
         verb = "replaced" if sid in pkg.songs else "added"
         if is_midi:
-            pkg.add_song(sid, midi.from_midi(Path(f).read_bytes(), voices=a.voices), lib)
+            msong = midi.from_midi(Path(f).read_bytes(), voices=a.voices)
+            for w in msong.warnings:
+                print("warning:", w)
+            pkg.add_song(sid, msong, lib)
         else:
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, song_id=sid)
         print("%s song '%s' from %s" % (verb, sid, f))
@@ -302,6 +305,7 @@ def export_cmd(args):
         if songs and a.midi:
             r = exporter.export_song(pkg, songs[0].name, a.o, fmt="mid", lib=lib)
             written = r.written
+            notes.extend(r.notes)
         elif a.o == "-":
             text = comp.song_to_mml(pkg, songs[0].name, notes)[0] if songs else comp.lib_to_mml(pkg, picked)[0]
             sys.stdout.write(text)
@@ -315,7 +319,9 @@ def export_cmd(args):
         d = Path(a.d)
         written = []
         for c in picked:
-            written.extend(exporter.export_song(pkg, c.name, d / (c.name + ".mid"), fmt="mid", lib=lib).written)
+            r = exporter.export_song(pkg, c.name, d / (c.name + ".mid"), fmt="mid", lib=lib)
+            written.extend(r.written)
+            notes.extend("%s: %s" % (c.name, n) for n in r.notes)
     else:
         written = comp.export_mml(pkg, picked, a.d, notes)
     for w in written:

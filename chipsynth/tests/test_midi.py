@@ -181,3 +181,167 @@ class ManyVoiceFileTests(unittest.TestCase):
         self.assertEqual(len(chans), 12)
         self.assertNotIn(9, chans)
         self.assertEqual(midi.from_midi(data).voices, 12)
+
+
+def drum_file(hits, melody=None, ppq=96):
+    """A format-0 file built by hand: channel 10 drum hits [(tick, GM note, velocity)] (each a 12-tick note, ended by a
+    note-on with velocity 0) and, when `melody` is given, [(tick, pitch, length)] on channel 1."""
+    ev = []
+    for tick, note, vel in hits:
+        ev += [(tick, 1, bytes([0x99, note, vel])), (tick + 12, 0, bytes([0x99, note, 0]))]
+    for tick, pitch, length in melody or []:
+        ev += [(tick, 1, bytes([0x90, pitch, 90])), (tick + length, 0, bytes([0x80, pitch, 0]))]
+    body, last = b"", 0
+    for tick, _, data in sorted(ev, key=lambda e: (e[0], e[1])):
+        body += midi._varlen(tick - last) + data
+        last = tick
+    body += b"\x00\xff\x2f\x00"
+    return midi._chunk(b"MThd", struct.pack(">HHH", 0, 1, ppq)) + midi._chunk(b"MTrk", body)
+
+
+def plays(tune):
+    """[(lane, tick, sample name, volume)] of a compiled tune's DAC lanes."""
+    return [(k + 1, t, smp.name, vv[0]) for k, lane in enumerate(tune.dac) for t, kind, smp, vv in lane if kind == "play"]
+
+
+class DrumImportTests(unittest.TestCase):
+    def test_gm_notes_land_on_the_kit_samples_on_the_generators_lanes(self):
+        hits = [(0, 36, 127), (0, 42, 64), (96, 38, 100), (192, 46, 100), (288, 49, 100), (288, 47, 100)]
+        song = midi.from_midi(drum_file(hits, melody=[(0, 60, 96)]))
+        self.assertEqual(song.warnings, [])
+        self.assertEqual(sorted(plays(song.compile())), sorted([
+            (1, 0, "kit_kick", 15), (2, 0, "kit_hat", 8), (1, 96, "kit_snare", 12), (2, 192, "kit_ohat", 12),
+            (2, 288, "kit_crash", 12), (1, 288, "kit_tom", 12)]))
+        self.assertEqual(song.voices, 1)
+        self.assertEqual(set(song.samples), {"kit_kick", "kit_hat", "kit_snare", "kit_ohat", "kit_crash", "kit_tom"})
+
+    def test_every_mapped_note_name(self):
+        for note, key in midi.GM_DRUMS.items():
+            song = midi.from_midi(drum_file([(0, note, 100)]))
+            self.assertEqual([p[2] for p in plays(song.compile())], [musicgen.DAC_SAMPLE[key]], note)
+
+    def test_velocity_is_volume(self):
+        vols = [plays(midi.from_midi(drum_file([(0, 38, vel)])).compile())[0][3] for vel in (1, 20, 64, 100, 127)]
+        self.assertEqual(vols, [1, 2, 8, 12, 15])
+
+    def test_times_are_rounded_to_the_grid_for_any_division(self):
+        song = midi.from_midi(drum_file([(0, 36, 100), (480, 38, 100), (500, 42, 100)], ppq=480))
+        self.assertEqual(sorted(plays(song.compile())), [(1, 0, "kit_kick", 12), (1, 96, "kit_snare", 12), (2, 96, "kit_hat", 12)])
+
+    def test_overlapping_hits_split_across_the_lanes_by_priority(self):
+        # kick + snare together: the kick keeps D1 and the snare moves to D2; add a crash and the snare has no lane left
+        song = midi.from_midi(drum_file([(0, 36, 100), (0, 38, 100), (96, 36, 100), (96, 38, 100), (96, 49, 100)]))
+        self.assertEqual(sorted(plays(song.compile())),
+                         [(1, 0, "kit_kick", 12), (1, 96, "kit_kick", 12), (2, 0, "kit_snare", 12), (2, 96, "kit_crash", 12)])
+        self.assertEqual(len(song.warnings), 1)
+        self.assertIn("did not fit", song.warnings[0])
+        self.assertIn("snare x1", song.warnings[0])
+
+    def test_the_same_drum_twice_at_once_plays_once_with_the_louder_velocity(self):
+        song = midi.from_midi(drum_file([(0, 42, 50), (0, 44, 90), (96, 49, 80), (96, 57, 100)]))
+        self.assertEqual(sorted(plays(song.compile())), [(2, 0, "kit_hat", 11), (2, 96, "kit_crash", 12)])
+        self.assertEqual(song.warnings, [])
+
+    def test_unmappable_percussion_is_reported_not_dropped_silently(self):
+        song = midi.from_midi(drum_file([(0, 36, 100), (96, 56, 100), (192, 56, 100), (288, 69, 100), (384, 35, 100)]))
+        self.assertEqual([p[2] for p in sorted(plays(song.compile()), key=lambda p: p[1])], ["kit_kick", "kit_kick"])
+        self.assertEqual(len(song.warnings), 1)
+        w = song.warnings[0]
+        self.assertIn("drum", w)
+        self.assertIn("Cowbell (note 56) x2", w)
+        self.assertIn("Cabasa (note 69) x1", w)
+
+    def test_a_file_of_only_unmappable_drums_is_refused_with_the_reason(self):
+        with self.assertRaises(midi.MidiError) as cm:
+            midi.from_midi(drum_file([(0, 56, 100)]))
+        self.assertIn("drum kit", str(cm.exception))
+
+    def test_a_drums_only_file_is_a_song_with_an_empty_voice(self):
+        song = midi.from_midi(drum_file([(0, 36, 100), (96, 38, 100), (192, 42, 100)]))
+        self.assertEqual(song.voices, 1)
+        self.assertEqual(song.tracks["V1"], [])
+        text = song.to_mml()
+        self.assertIn("D1:", text)
+        self.assertIn("D2:", text)
+        self.assertIn("[sample]", text)
+        again = Song.from_mml(text)                          # the MML it writes reads back to the same drums
+        self.assertEqual(plays(again.compile()), plays(song.compile()))
+
+    def test_note_offs_and_other_channels_do_not_make_hits(self):
+        # a note-on with velocity 0 is an off, and a note on channel 1 with a drum number is a pitch
+        song = midi.from_midi(drum_file([(0, 38, 100)], melody=[(0, 36, 96)]))
+        self.assertEqual(len(plays(song.compile())), 1)
+        self.assertEqual(notes(song.compile(), 0), [(0, 96, 36)])
+
+    def test_files_without_percussion_come_out_as_before(self):
+        song = midi.from_midi(MidiTests.file((0, 1, 2), lens={1: 2}, start={2: 1}))
+        self.assertEqual(song.warnings, [])
+        self.assertEqual((song.voices, song.dacs), (3, 2))
+        self.assertEqual(song.samples, {})
+        self.assertNotIn("D1:", song.to_mml())
+        self.assertNotIn("[sample]", song.to_mml())
+
+    def test_command_line_import_reports_and_keeps_the_drums(self):
+        import contextlib
+        import io
+        d = Path(tempfile.mkdtemp())
+        (d / "beat.mid").write_bytes(drum_file([(0, 36, 100), (0, 56, 100), (48, 42, 100)], melody=[(0, 60, 96)]))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(main(["import", str(d / "p.csp"), str(d / "beat.mid")]), 0)
+        self.assertIn("warning:", out.getvalue())
+        self.assertIn("Cowbell", out.getvalue())
+        tune = pk.load(d / "p.csp").tune("beat")
+        self.assertEqual(sorted(plays(tune)), [(1, 0, "kit_kick", 12), (2, 48, "kit_hat", 12)])
+
+
+class DrumExportTests(unittest.TestCase):
+    @staticmethod
+    def drums_of(data):
+        _, tracks = midi.parse(data)
+        return sorted((tick, a, b) for t in tracks for tick, kind, a, b, ch in t if kind == "on" and ch == 9)
+
+    def test_d1_d2_hits_are_channel_10_notes(self):
+        text = ("[sample]\nkit_kick = kit_kick\nkit_hat = kit_hat\nkit_tom = kit_tom\n"
+                "V1: c1\nD1: v15 kit_kick4 v8 kit_tom4 r2\nD2: v15 r4 kit_hat4\n")
+        data = midi.to_midi(Song.from_mml(text).compile())
+        self.assertEqual(self.drums_of(data), [(0, 36, 127), (96, 42, 127), (96, 47, 68)])
+
+    def test_no_drum_track_without_hits_so_plain_songs_are_unchanged(self):
+        tune = Song.from_mml(MidiTests.TEXT).compile()
+        _, tracks = midi.parse(midi.to_midi(tune))
+        self.assertEqual(len(tracks), 4)                             # tempo track + 3 voices
+        self.assertEqual(midi.drum_hits(tune), ([], []))
+
+    def test_samples_without_a_gm_note_are_reported_on_export(self):
+        text = "[sample]\nkit_kick = kit_kick\nkit_hey = kit_hey\nV1: c1\nD1: kit_kick4 kit_hey4\n"
+        hits, lines = midi.drum_hits(Song.from_mml(text).compile())
+        self.assertEqual([h[1] for h in hits], [36])
+        self.assertEqual(len(lines), 1)
+        self.assertIn("kit_hey", lines[0])
+
+    def test_round_trip_keeps_a_generated_beat(self):
+        for kind in ("fight", "town", "boss"):
+            tune = Song.from_mml(musicgen.generate(kind, 7, "", None, dac=True)).compile()
+            back = midi.from_midi(midi.to_midi(tune))
+            self.assertEqual(back.warnings, [], kind)
+            self.assertTrue(plays(tune))
+            self.assertEqual(sorted(plays(back.compile())), sorted(plays(tune)), kind)
+
+    def test_round_trip_reports_the_hey_it_cannot_write(self):
+        tune = Song.from_mml(musicgen.generate("boss", 3, "", None, dac=True, voice=True)).compile()
+        self.assertTrue(any("kit_hey" in x for x in midi.drum_hits(tune)[1]))
+        back = midi.from_midi(midi.to_midi(tune))
+        self.assertEqual(sorted(plays(back.compile())), sorted(p for p in plays(tune) if p[2] != "kit_hey"))
+
+    def test_export_command_line_carries_the_drums_and_names_what_it_left_out(self):
+        import contextlib
+        import io
+        d = Path(tempfile.mkdtemp())
+        (d / "t.mml").write_text("[sample]\nkit_snare = kit_snare\nkit_hey = kit_hey\nV1: c1\nD1: kit_snare4 kit_hey4\n")
+        self.assertEqual(main(["import", str(d / "p.csp"), str(d / "t.mml")]), 0)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(main(["export", str(d / "p.csp"), "-d", str(d / "out"), "--midi"]), 0)
+        self.assertEqual([x[1] for x in self.drums_of((d / "out" / "t.mid").read_bytes())], [38])
+        self.assertIn("kit_hey", err.getvalue())
