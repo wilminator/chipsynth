@@ -224,8 +224,11 @@ class Trace:
     pieces: list = None                               # per track (V1.., then D1..), in time order
     ends: list = None                                 # tick where each track's events end
     final: list = None                                # each track's final state
+    keys: list = None                                 # a zero-length "key" Piece for every `key` event, in play order
 
     def __post_init__(self):
+        if self.keys is None:
+            self.keys = []
         if self.pieces is None:
             self.pieces = [[] for _ in range(self.lanes)]
         if self.ends is None:
@@ -418,6 +421,9 @@ class _Compiler:
         self.p.tweak(v, e.word, e.arg, 0, 0)
 
     def do_Key(self, v, e, depth):
+        if self.trace is not None:
+            self.trace.keys.append(Piece(self.lane, v.pos, 0, "key", e, self.cur, (v.octave, v.boundary, v.key), None, v.last,
+                                         tuple(self.stack)))
         if e.tonic is None:
             v.key = None
             return

@@ -21,7 +21,7 @@ import re
 from . import mml
 from .mml import MMLError, LETTER
 from .song import (Note, Degree, Rest, Extend, Octave, Select, Repeat, Call, Play, Tempo, Loop, Trace, Clip,
-                   SongError, Volume, Tweak, Key, Fx, Bar, Comment, Length)
+                   SongError, Volume, Tweak, Key, Fx, Bar, Comment, Length, _Compiler, ticks_of)
 from .synth import WAVES, Instrument
 from .songmml import length_pieces
 
@@ -78,6 +78,110 @@ def _lead(c, ev):
     """Where in `c` events that come before the note `ev` go (before the `<` that shifts its octave, if any)."""
     i = _index(c, ev)
     return i - 1 if i > 0 and _is_shift(c[i - 1]) else i
+# ---- per-note effects: any mix of vibrato, arpeggio, slide and a pulse-width sweep
+# A setting is (vibrato (rate, depth), arpeggio offsets, arpeggio steps per beat, slide, pulse sweep (from, to, rate)).
+FX_FIELDS = ("vib", "arp", "arprate", "slide", "pws")
+FX_OFF = {"vib": (0, 0), "arp": (), "slide": 0, "pws": (0, 0, 0)}      # what "off" is for each (arprate has no off)
+
+
+def _fx_raw(n):
+    """The effect state a compiled note plays with, as the instrument holds it: (vib rate, vib depth, arp, arp rate, slide,
+    pws from, pws to, pws rate)."""
+    i = n.inst
+    return (i.vib_rate, i.vib_depth, tuple(i.arp), i.arprate, n.slide, i.pws_from, i.pws_to, i.pws_rate)
+
+
+def _fx_norm(st):
+    """`_fx_raw` with the parts that make no sound folded away (a vibrato with no depth is off, so is an arpeggio with no
+    steps, a sweep with no rate), so two states that sound the same compare equal."""
+    vr, vd, arp, rate, slide, pf, pt, pr = st
+    vib = (vr, vd) if vr and vd else (0, 0)
+    pws = (pf, pt, pr) if pr and pf and pt else (0, 0, 0)
+    return vib + (tuple(arp), rate if arp else 0, slide) + pws
+
+
+def _fx_check(changes):
+    """Validate {field: value} of FX_FIELDS and return it in canonical form, or raise EditError."""
+    out = {}
+    for k, v in changes.items():
+        if k not in FX_FIELDS:
+            raise EditError("no such note effect: %s" % k)
+        try:
+            if k == "vib":
+                r, d = (int(x) for x in v)
+                if not (0 <= r <= 15 and 0 <= d <= 15):
+                    raise EditError("vibrato rate and depth are 0 to 15")
+                v = (r, d)
+            elif k == "arp":
+                v = tuple(int(x) for x in v)
+                if len(v) > 8 or any(not -24 <= x <= 24 for x in v):
+                    raise EditError("an arpeggio is up to 8 offsets of -24 to 24 semitones")
+            elif k == "arprate":
+                v = int(v)
+                if not 1 <= v <= 32:
+                    raise EditError("arpeggio speed is 1 to 32 steps per beat")
+            elif k == "slide":
+                v = int(v)
+                if not 0 <= v <= 192:
+                    raise EditError("slide is 0 to 192 (1/48 of a quarter note each)")
+            else:
+                f, t, r = (int(x) for x in v)
+                if (f, t, r) != (0, 0, 0) and not (1 <= f <= 99 and 1 <= t <= 99 and 0 <= r <= 15):
+                    raise EditError("a pulse sweep is from 1-99 to 1-99 percent at rate 0 to 15")
+                v = (f, t, r)
+        except (TypeError, ValueError):
+            raise EditError("bad value for %s" % k)
+        out[k] = v
+    return out
+
+
+def _fx_apply(have, changes):
+    """The raw state after `changes` (canonical) are applied to the raw state `have`."""
+    vr, vd, arp, rate, slide, pf, pt, pr = have
+    if "vib" in changes:
+        vr, vd = changes["vib"]
+    if "arp" in changes:
+        arp = changes["arp"]
+    if "arprate" in changes:
+        rate = changes["arprate"]
+    if "slide" in changes:
+        slide = changes["slide"]
+    if "pws" in changes:
+        pf, pt, pr = changes["pws"]
+    return (vr, vd, tuple(arp), rate, slide, pf, pt, pr)
+
+
+def _fx_tweaks(have, want):
+    """Tweaks that turn the raw effect state `have` into the (normalized or raw) state `want` as far as it makes a sound."""
+    h, w = _fx_norm(have), _fx_norm(want)
+    out = []
+    if h[:2] != w[:2]:
+        out.append(Tweak("vib", "%d,%d" % w[:2] if any(w[:2]) else "off"))
+    if h[2] != w[2]:
+        out.append(Tweak("arp", ",".join(str(x) for x in w[2]) if w[2] else "off"))
+    if w[2] and want[3] != have[3]:                   # (the steps per beat only matter while there is an arpeggio)
+        out.append(Tweak("arprate", str(want[3])))
+    if h[4] != w[4]:
+        out.append(Tweak("slide", str(w[4])))
+    if h[5:] != w[5:]:
+        out.append(Tweak("pws", "%d,%d,%d" % w[5:] if any(w[5:]) else "off"))
+    return out
+
+
+def fx_marks(note):
+    """The roll's little marker for a compiled note: ~ vibrato, / slide, ^ arpeggio (^m a minor one), w pulse sweep."""
+    i = note.inst
+    out = ""
+    if i.vib_rate and i.vib_depth:
+        out += "~"
+    if note.slide:
+        out += "/"
+    if i.arp:
+        out += "^m" if tuple(i.arp) == EFFECTS["arpeggio minor"][1] else "^"
+    if i.pws_rate and i.pws_from and i.pws_to and i.wave == "pulse":
+        out += "w"
+    return out
+
 GROW_CAP = 16 * mml.TICKS_WHOLE            # how far past the end a note may be pulled in one go
 
 
@@ -89,26 +193,28 @@ def writable(ticks):
         return False
 
 
-def spell(pitch, state):
+def spell(pitch, state, natural=False):
     """Events that sound `pitch` at a voice whose (octave, boundary, key) is `state`: (before, note-event, after).
-    The note is in the current octave when it can be, else the octave is shifted just for this note."""
+    The note is in the current octave when it can be, else the octave is shifted just for this note.  With `natural` a
+    shifted octave is preferred to a sharp or flat (`> c <` rather than `b#`)."""
     octave, b, key = state
-    for k in (0, -1, 1, -2, 2, -3, 3):
+    ks = (0, -1, 1, -2, 2, -3, 3)
+    combos = [(k, acc) for acc in (0, 1, -1) for k in ks] if natural else [(k, acc) for k in ks for acc in (0, 1, -1)]
+    for k, acc in combos:
         o = octave + k
         if not 0 <= o <= 8:
             continue
-        for acc in (0, 1, -1):
-            if key is None:
-                for letter, pc in LETTER.items():
-                    if o * 12 + b + ((pc - b) % 12) + acc == pitch:
-                        return _wrap(k, Note(letter, acc))
-            else:
-                tonic, scale = key
-                n = len(scale)
-                for d in range(1, n + 3):
-                    idx = d - 1
-                    if o * 12 + tonic + scale[idx % n] + 12 * (idx // n) + acc == pitch:
-                        return _wrap(k, Degree(d, acc))
+        if key is None:
+            for letter, pc in LETTER.items():
+                if o * 12 + b + ((pc - b) % 12) + acc == pitch:
+                    return _wrap(k, Note(letter, acc))
+        else:
+            tonic, scale = key
+            n = len(scale)
+            for d in range(1, n + 3):
+                idx = d - 1
+                if o * 12 + tonic + scale[idx % n] + 12 * (idx // n) + acc == pitch:
+                    return _wrap(k, Degree(d, acc))
     raise EditError("that pitch cannot be written here")
 
 
@@ -154,6 +260,72 @@ def _set_ticks(ev, ticks):
         ev.ticks = ticks
     else:
         ev.dur = ticks
+
+@dataclasses.dataclass(frozen=True)
+class KeyMark:
+    """A `key` event as the voice plays it: `tonic` is 0-11 (None for `key off`), `scale` a scale name."""
+    voice: int
+    tick: int
+    tonic: int = None
+    scale: str = None
+
+
+def _pitch_of(ev, state):
+    """What the note event `ev` sounds like in `state` ((octave, boundary, key)), or None when it cannot be played there."""
+    octave, b, key = state
+    if isinstance(ev, Note):
+        return octave * 12 + b + ((LETTER[ev.letter] - b) % 12) + ev.acc if key is None else None
+    if key is None:
+        return None
+    tonic, scale = key
+    n = len(scale)
+    if not 1 <= ev.degree <= n + 2:
+        return None
+    idx = ev.degree - 1
+    return octave * 12 + tonic + scale[idx % n] + 12 * (idx // n) + ev.acc
+
+
+def _fold_shifts(container, i, d):
+    """container[i] is an octave shift we added next to a note; join it with the plain shift beyond it (at i + d) so `> <`
+    does not pile up (two that cancel both go)."""
+    k = i + d
+    if not 0 <= k < len(container):
+        return
+    a, b = container[i], container[k]
+    if _is_shift(a) and _is_shift(b):
+        total = a.shift + b.shift
+        if total:
+            b.shift = total
+            del container[i]
+        else:
+            del container[max(i, k)]
+            del container[min(i, k)]
+
+
+class _Scan(_Compiler):
+    """Walks one voice like the compiler does but only notes where each note event is played and in what state, so it can
+    run on a song whose notes and keys do not agree yet (which `compile` refuses).  `scan(voice)` gives
+    [(event, container, (octave, boundary, key), stack)], one per time an event is played, in order."""
+
+    def __init__(self, song, lib):
+        super().__init__(song, lib, None)
+        self.seen = []
+
+    def scan(self, voice):
+        self.lane = voice
+        self.play(self.p.voices[voice], self.song.tracks.get(self.song.names[voice], ()), 0)
+        return self.seen
+
+    def _see(self, v, e, depth):
+        self.seen.append((e, self.cur, (v.octave, v.boundary, v.key), tuple(self.stack)))
+        v.pos += ticks_of(e.dur, v.deflen)
+        v.tie, v.last = False, None
+
+    do_Note = do_Degree = _see
+
+    def do_Extend(self, v, e, depth):
+        v.pos += e.ticks
+
 
 
 class Editor:
@@ -526,6 +698,216 @@ class Editor:
         self._pin(voice, before, _fx_sig, lambda n, w: _fx_events(_fx_sig(n), w), skip)
         return effect
 
+    # ---- any mix of effects on any number of notes
+    def note_effects(self, voice, index):
+        """What the compiled note plays with: {"vib": (rate, depth), "arp": offsets, "arprate": steps per beat, "slide": n,
+        "pws": (from, to, rate)}.  It is the instrument's own effects as well as anything set on the note."""
+        raw = _fx_raw(self.tune.voices[voice][index])
+        n = _fx_norm(raw)
+        return {"vib": n[:2], "arp": tuple(raw[2]), "arprate": raw[3], "slide": raw[4], "pws": n[5:]}
+
+    def set_note_effects(self, selection, **changes):
+        """Give the selected notes ([(voice, start)]) these effects and leave everything else about them alone.  Each keyword
+        is one of vib=(rate, depth), arp=(offsets...), arprate=steps per beat, slide=n, pws=(from, to, rate); FX_OFF[name]
+        is "off" for it.  Only the selected notes change: `vib` / `arp` / `pws` are sticky in MML, so the first note after
+        them is given its old effects back.  One undo step, all or nothing.  Returns how many notes changed."""
+        return self.change("note effects", lambda: self._set_fx(selection, changes))
+
+    def _set_fx(self, selection, changes):
+        changes = _fx_check(changes)
+        if not changes:
+            raise EditError("no effect to change")
+        targets = sorted({(int(v), int(start)) for v, start in selection})
+        if not targets:
+            raise EditError("nothing selected")
+        before, skip = {}, {}
+        for v, _ in targets:
+            if not 0 <= v < self.song.voices:
+                raise EditError("effects are for the melodic voices")
+            before[v] = {n.start: _fx_norm(_fx_raw(n)) for n in self.tune.voices[v]}
+            skip[v] = set()
+        for v, start in targets:                      # every picked note's events are left to this edit, not pinned back
+            i = self.find(v, start)
+            if i is None:
+                raise EditError("a selected note is gone")
+            skip[v] |= self._target_events(v, i)[2]
+        for v, start in targets:
+            i = self.find(v, start)
+            if i is None:
+                raise EditError("a selected note is gone")
+            have = _fx_raw(self.tune.voices[v][i])
+            want = _fx_apply(have, changes)
+            g, todo, ids = self._target_events(v, i)
+            if _fx_norm(have) == _fx_norm(want):
+                continue
+            for p in todo:
+                c = p.container
+                k = _lead(c, p.event)
+                new = _fx_tweaks(have, want)
+                words = {t.word for t in new}
+                while k > 0 and isinstance(c[k - 1], Tweak) and c[k - 1].word in words:      # replace our own earlier ones
+                    del c[k - 1]
+                    k -= 1
+                c[k:k] = new
+            self.refresh()
+            self._pin(v, before[v], lambda n: _fx_norm(_fx_raw(n)), lambda n, w: _fx_tweaks(_fx_raw(n), w), skip[v])
+        return sum(1 for v, start in targets if _fx_norm(_fx_raw(self.tune.voices[v][self.find(v, start)])) != before[v][start])
+
+    # ---- key changes (a `key` event is per voice; the notes after it are written as degrees of it)
+    def key_marks(self):
+        """[KeyMark] for every `key` event the voices play, in time order (a pattern played twice gives two)."""
+        out = [KeyMark(p.voice, p.start, p.event.tonic, p.event.scale) for p in self.trace.keys if p.voice < self.song.voices]
+        return sorted(out, key=lambda m: (m.tick, m.voice))
+
+    def key_at(self, voice, tick):
+        """The KeyMark that governs `voice` at `tick` (its tonic is None after a `key off`), or None before any."""
+        got = None
+        for m in self.key_marks():
+            if m.voice == voice and m.tick <= tick:
+                got = m
+        return got
+
+    def set_key_at(self, tick, tonic, scale=None, voices=(0,), keep_pitch=True):
+        """Put a key change at `tick` in each of `voices` (a `key` event there is edited, else one is inserted between the
+        notes, splitting a rest if needed), or `key off` with tonic None.  Letter notes after it are rewritten as degrees (and
+        degrees as letters after a `key off`) so they sound as before; with keep_pitch False the notes already written as
+        degrees move with the new key instead (a modulation).  Refused inside a note, a pattern or a repeat.  Returns the
+        number of voices changed."""
+        return self.change("key change", lambda: self._set_key_at(tick, tonic, scale, voices, keep_pitch))
+
+    def remove_key_at(self, tick, voices=(0,)):
+        """Take out the `key` events that start at `tick` in `voices`; the notes keep their pitch (they become letters when
+        no key is left).  Returns how many events went."""
+        return self.change("remove key change", lambda: self._remove_key_at(tick, voices))
+
+    def _key_voices(self, voices):
+        vs = sorted({int(v) for v in voices})
+        if not vs or any(not 0 <= v < self.song.voices for v in vs):
+            raise EditError("a key change belongs to a melodic voice")
+        return vs
+
+    def _key_snapshot(self, vs):
+        return ({v: [(n.start, n.pitch) for n in self.tune.voices[v]] for v in vs},
+                {v: [p for p in self.trace.pieces[v] if p.kind == "note"] for v in vs})
+
+    def _set_key_at(self, tick, tonic, scale, voices, keep_pitch):
+        tick = int(tick)
+        if tick < 0:
+            raise EditError("a key change goes at or after the start")
+        if tonic is not None:
+            tonic = int(tonic) % 12
+            if scale not in mml.SCALES and scale not in self.song.keys:
+                raise EditError("no such scale: %s" % scale)
+        else:
+            scale = None
+        vs = self._key_voices(voices)
+        pitches, old = self._key_snapshot(vs)
+        seen = set()
+        for v in vs:
+            marks = [p for p in self.trace.keys if p.voice == v and p.start == tick]
+            if marks:
+                for p in marks:
+                    if id(p.event) not in seen:
+                        seen.add(id(p.event))
+                        p.event.tonic, p.event.scale = tonic, scale
+            else:
+                if tick and tick >= self.trace.ends[v]:
+                    raise EditError("that is past the end of %s" % self.song.names[v])
+                self._insert_at(v, tick, Key(tonic, scale), lead=True)
+        self._rewrite_notes(vs, old, keep_pitch)
+        self._check_pitches(vs, pitches, keep_pitch)
+        return len(vs)
+
+    def _remove_key_at(self, tick, voices):
+        tick = int(tick)
+        vs = self._key_voices(voices)
+        pitches, old = self._key_snapshot(vs)
+        gone = {}
+        for p in self.trace.keys:
+            if p.voice in vs and p.start == tick:
+                gone[id(p.event)] = p
+        if not gone:
+            raise EditError("no key change there")
+        for p in gone.values():
+            del p.container[_index(p.container, p.event)]
+        self._rewrite_notes(vs, old, True)
+        self._check_pitches(vs, pitches, True)
+        return len(gone)
+
+    def _check_pitches(self, vs, pitches, keep_pitch):
+        self.refresh()
+        for v in vs:
+            now = [(n.start, n.pitch) for n in self.tune.voices[v]]
+            if (keep_pitch and now != pitches[v]) or [a for a, _ in now] != [a for a, _ in pitches[v]]:
+                raise EditError("the notes of %s cannot be kept as they sound in that key" % self.song.names[v])
+
+    def _rewrite_notes(self, vs, old, keep_pitch):
+        """After key events changed (before the song is compiled again): write every note of the voices `vs` so it is valid
+        under the key it now plays in (a degree under a key, a letter under none) and, with keep_pitch, sounds as it did.
+        `old` has the voices' note Pieces from before the change.  Events used in several places must agree on how they
+        are spelled."""
+        need, fine = {}, set()                                  # events to rewrite / events played where they are fine as they are
+        scans = {}
+        for v in vs:
+            seen = scans[v] = _Scan(self.song, self.lib).scan(v)
+            if len(seen) != len(old[v]) or any(a[0] is not b.event for a, b in zip(seen, old[v])):
+                raise EditError("internal: the notes moved while changing the key")
+            for (ev, cont, state, stack), p in zip(seen, old[v]):
+                key = state[2]
+                fits = (isinstance(ev, Note) and key is None) or (isinstance(ev, Degree) and key is not None
+                                                                   and 1 <= ev.degree <= len(key[1]) + 2)
+                if fits and (not keep_pitch or _pitch_of(ev, state) == p.pitch):
+                    fine.add(id(ev))
+                else:
+                    need[id(ev)] = (ev, cont)
+        if need.keys() & fine:
+            raise EditError("a pattern or repeat plays some of these notes in different keys: use Make unique first")
+        for ev, cont in need.values():                          # a `<` `>` pair round a note goes: its spelling takes the shift
+            _unwrap(cont, ev)
+        plan = {}
+        for v in vs:
+            for (ev, cont, state, stack), p in zip(_Scan(self.song, self.lib).scan(v), old[v]):
+                if id(ev) not in need:
+                    continue
+                before, new, after = spell(p.pitch, state, natural=True)
+                sig = (before[0].shift if before else 0, type(new).__name__, getattr(new, "letter", None),
+                       getattr(new, "degree", None), new.acc)
+                ent = plan.setdefault(id(ev), dict(ev=ev, cont=cont, sigs=set(), made=None))
+                ent["sigs"].add(sig)
+                ent["made"] = (before, new, after)
+        for ent in plan.values():
+            if len(ent["sigs"]) > 1:
+                raise EditError("a pattern or repeat plays some of these notes in different keys or octaves: "
+                                "use Make unique first")
+        for ent in plan.values():
+            ev, cont = ent["ev"], ent["cont"]
+            before, new, after = ent["made"]
+            new.dur = ev.dur
+            self._replace(cont, ev, before + [new] + after)
+            j = _index(cont, new)
+            if after:
+                _fold_shifts(cont, j + 1, 1)
+            if before:
+                _fold_shifts(cont, j - 1, -1)
+
+    def edit_notes(self, selection=(), effects=None, key=None):
+        """The note panel's edit as one undo step: `effects` ({field: value}, see set_note_effects) for the selected notes
+        and/or a `key` change: dict(tick=, tonic=, scale=, voices=, keep_pitch=True) to set one (tonic None: key off),
+        dict(tick=, voices=, remove=True) to take one out.  All or nothing.  Returns (notes changed, key events changed)."""
+        def run():
+            if not key and not effects:
+                raise EditError("nothing to change")
+            k = 0
+            if key:
+                if key.get("remove"):
+                    k = self._remove_key_at(key["tick"], key.get("voices", (0,)))
+                else:
+                    k = self._set_key_at(key["tick"], key.get("tonic"), key.get("scale"), key.get("voices", (0,)),
+                                         key.get("keep_pitch", True))
+            n = self._set_fx(selection, effects) if effects else 0
+            return n, k
+        return self.change("note effects and key", run)
+
     # ---- the key
     def transpose_in_key(self, notes, steps, tonic, scale):
         """Move `notes` ([(voice, index)]) by `steps` degrees of the key `tonic` (0-11) `scale` (a name in mml.SCALES);
@@ -864,9 +1246,11 @@ class Editor:
             if clip.raw is None:
                 strip(clip.items)
 
-    def _insert_at(self, lane, tick, event):
-        """Put a zero-length event (tempo, loop marker) at `tick` of a voice's own list, splitting a rest if needed."""
+    def _insert_at(self, lane, tick, event, lead=False):
+        """Put a zero-length event (tempo, loop marker) at `tick` of a voice's own list, splitting a rest if needed.
+        With `lead`, an event that goes before a note goes before that note's `<` / `>` octave shift too."""
         top = self._track(lane)
+        at = (lambda ev: _lead(top, ev)) if lead else (lambda ev: _index(top, ev))
         if tick >= self.trace.ends[lane]:
             gap = tick - self.trace.ends[lane]
             self._check(gap)
@@ -874,7 +1258,7 @@ class Editor:
             return
         for p in self.trace.pieces[lane]:
             if p.container is top and p.dur > 0 and p.start == tick:
-                top.insert(_index(top, p.event), event)
+                top.insert(at(p.event), event)
                 return
         firsts = {}
         for p in self.trace.pieces[lane]:
@@ -883,7 +1267,7 @@ class Editor:
                 firsts[id(ev)] = (min(p.start, firsts.get(id(ev), (p.start, ev))[0]), ev)
         for start, ev in firsts.values():
             if start == tick:                        # between a pattern call / repeat and what came before it
-                top.insert(_index(top, ev), event)
+                top.insert(at(ev), event)
                 return
         for p in self.trace.pieces[lane]:
             if p.container is top and p.kind == "rest" and p.start < tick < p.start + p.dur:
