@@ -553,6 +553,78 @@ class ExportTests(Base):
         self.assertIn("PAL timing", " ".join(lines))
         a.frame()                                                    # the overlay draws
 
+    def test_famistudio_dialog_offers_a_version_row_and_remembers_the_choice(self):
+        a = self.a
+        asked = []
+        target = self.dir / "v.txt"
+        a.choose_path = lambda save, title, pattern, ext="", initialfile="", initialdir=None: asked.append(save) or str(target)
+        a.export_dialog("famistudio")
+        rows = {r["key"]: r for r in a.fileopts["rows"]}
+        self.assertEqual([c[0] for c in rows["stamp"]["choices"]], ["default", "reference", "typed", "none"])
+        self.assertEqual(rows["stamp"]["i"], 0)
+        a.fileopts_step(1, 3)                                         # None
+        a.fileopts_finish(True)
+        self.assertEqual(a.prefs.fs_stamp, "none")
+        self.assertNotIn("Version", target.read_text().splitlines()[0])
+        self.assertTrue(any("no Version" in x for x in a.last_report[1]))
+        a.frame()
+        a.export_dialog("famistudio")                                 # the dialog opens on the last choice
+        self.assertEqual(a.fileopts["rows"][1]["i"], 3)
+        a.fileopts_finish(False)
+
+    def test_famistudio_dialog_typed_version_is_asked_checked_and_remembered(self):
+        a = self.a
+        target = self.dir / "t.txt"
+        a.choose_path = lambda *args, **kw: str(target)
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 2)                                         # typed
+        a.fileopts_finish(True)
+        self.assertEqual(a.overlay, "prompt")
+        a.prompt["text"] = "four"
+        a.finish_prompt(True)
+        self.assertFalse(target.exists())                             # refused, says why
+        self.assertIn("looks like 4.2.0", a.message)
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 2)
+        a.fileopts_finish(True)
+        a.prompt["text"] = "4.2.0"
+        a.finish_prompt(True)
+        self.assertIn('Version="4.2.0"', target.read_text().splitlines()[0])
+        self.assertEqual((a.prefs.fs_stamp, a.prefs.fs_typed), ("typed", "4.2.0"))
+        a.export_dialog("famistudio")
+        self.assertIn("4.2.0", a.fileopts["rows"][1]["choices"][2][1])
+        a.fileopts_finish(False)
+
+    def test_famistudio_dialog_reference_file_is_chosen_then_the_output(self):
+        a = self.a
+        ref = self.write("ref.txt", 'Project Version="4.2.0" TempoMode="FamiStudio"\n')
+        target = self.dir / "r.txt"
+        asked = []
+        a.choose_path = lambda save, title, pattern, ext="", initialfile="", initialdir=None: asked.append(save) or str(target if save else ref)
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 1)                                         # reference
+        a.fileopts_finish(True)
+        self.assertEqual(asked, [False, True])
+        self.assertIn('Version="4.2.0"', target.read_text().splitlines()[0])
+        self.assertEqual((a.prefs.fs_stamp, a.prefs.fs_ref), ("reference", str(ref)))
+        self.assertTrue(any("copied from the reference file ref.txt" in x for x in a.last_report[1]))
+
+    def test_famistudio_dialog_reference_cancelled_or_not_famistudio_writes_nothing(self):
+        a = self.a
+        target = self.dir / "n.txt"
+        a.choose_path = lambda save, *args, **kw: ""
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 1)
+        a.fileopts_finish(True)
+        self.assertFalse(target.exists())
+        bad = self.write("bad.txt", "not famistudio\n")
+        a.choose_path = lambda save, *args, **kw: str(target if save else bad)
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 1)
+        a.fileopts_finish(True)
+        self.assertFalse(target.exists())
+        self.assertIn("not a FamiStudio text file", a.message)
+
     def test_midi_export_says_the_drum_lanes_are_not_in_it(self):
         a = self.a
         song = Song.from_mml(musicgen.generate("town", 1, "", None, dac=True), a.lib)
