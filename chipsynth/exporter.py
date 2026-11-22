@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Michael Allen Wilmes
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mid, mml or csp.
+"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mid, mml, csp, FamiStudio text or GoatTracker 2.
 
     pkg = open_source("music/forest.csp")
     r = export_song(pkg, "dawn", "dawn.wav", AudioOptions(volume=0.8, normalize=True, start=frames("2s"), loops=1))
@@ -25,8 +25,8 @@ from .player import TunePlayer
 from .song import Song
 from .synth import RATE, to_pcm16
 
-FORMATS = ("wav", "mid", "mml", "csp", "famistudio")
-SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp", ".txt": "famistudio"}
+FORMATS = ("wav", "mid", "mml", "csp", "famistudio", "goattracker")
+SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp", ".txt": "famistudio", ".sng": "goattracker"}
 
 
 class ExportError(Exception):
@@ -211,10 +211,13 @@ def format_of(path, fmt=None):
     return f
 
 
-def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region="ntsc", fs_version="4.5.3"):
-    """Write song `song_id` of `pkg` to `path` as wav, mid, mml or csp (see the module doc).  Returns a Result."""
+def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region=None, fs_version="4.5.3", multispeed=1, gt_tempo="exact"):
+    """Write song `song_id` of `pkg` to `path` as wav, mid, mml, csp, famistudio or goattracker (see the module doc).  Returns a Result.
+    `region` is ntsc or pal for the two tracker formats (default: ntsc for FamiStudio, pal for GoatTracker, as its importer);
+    `multispeed` (1, 2, 4) and `gt_tempo` (exact or speed) are GoatTracker's."""
     opts = opts or AudioOptions()
     fmt = format_of(path, fmt)
+    region = region or ("pal" if fmt == "goattracker" else "ntsc")
     song_id = pick_song(pkg, song_id)
     if fmt != "wav" and opts.used():
         raise ExportError("%s only applies to a wav, not a %s" % (", ".join("--" + k for k in opts.used()), fmt))
@@ -234,6 +237,17 @@ def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region="ntsc"
             text, rep = famistudio_export.dump(pkg.tune(song_id, lib), region, fs_version, name=song_id if not pkg.songs[song_id].title else None)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8", newline="\n")
+            r.written = [path]
+            r.notes += rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
+        elif fmt == "goattracker":
+            from .formats import goattracker_export
+            try:
+                data, rep = goattracker_export.dump(pkg.tune(song_id, lib), region, multispeed, name=song_id if not pkg.songs[song_id].title else None,
+                                                    tempo=gt_tempo)
+            except goattracker_export.GoatTrackerExportError as e:
+                raise ExportError(str(e))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
             r.written = [path]
             r.notes += rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
         elif fmt == "mml":

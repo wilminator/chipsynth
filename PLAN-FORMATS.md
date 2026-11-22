@@ -284,5 +284,17 @@ Vibrato is a triangle swing in the player and a sine in chipsynth, so it is alwa
 
 Fixed in slice 2: the song's bpm was multiplied by the multispeed, which played a multispeed song at N times its speed; it follows the video rate only (125 pal, 150 ntsc).
 Instrument names are made into identifiers (anything but letters, digits and `_` becomes `_`).
-Not built: a writer (GoatTracker `.sng` export); the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
+Not built: the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
 the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
+
+**GoatTracker `.sng` export: built** (branch `gt-writer`). `chipsynth/formats/goattracker_export.py`, with the reader as its check (`tests/test_goattracker_export.py`):
+`python -m chipsynth export-song SOURCE[:SONG] -o OUT.sng [--region pal|ntsc] [--multispeed 1|2|4] [--gt-tempo exact|speed]` (pal by default, as the importer), and the composer's File > Export > GoatTracker 2.
+V1-V3 -> the three voices; notes, rests, key-offs, the loop point (a `once` song ends in a silent pattern that repeats, said in the Report), orders, patterns of a bar (shared when equal) and instruments with ADSR,
+waveform and pulse width. Arpeggio -> a looping wavetable (a frame a row, so steps are whole frames), pulse sweep -> a pulse table that ramps up and down (at most 127 a frame, so a fast wide sweep is narrowed),
+vibrato -> a relative speed table entry found by running the importer's own model (the player's cycles are whole frames, so only some rates and depths exist; the nearest is used and listed).
+Timing: rows of the coarsest grid (at most a sixteenth) that every note, loop and tempo change lies on; a row is at least 3 frames; row lengths come from the tempo rounded cumulatively, and where they are not all equal the speed is
+changed on the rows that differ (command F on voice 1), which is exact to half a frame; `--gt-tempo speed` writes one speed instead. At the native tempo (125 bpm PAL, 150 NTSC, any multispeed) notes and timing round trip tick for tick.
+Left out and reported: more voices, DACs, echo, reverb, detune, differences in note and instrument volume, pan, slides, the filter, the short noise mode; a sine is a triangle; the song is cut, and says so, past 208 patterns or 253 order entries.
+Two importer fixes came with it: the end of a song was found one frame late (the last note without a key-off was a frame too long), and an instrument's vibrato was lost on a row that had a tempo or other non-portamento command.
+**Not verified:** the files were read back by chipsynth's own importer only, never opened in a real GoatTracker; the tables and commands follow the same reading of `gplay.c` the importer does. In particular unchecked: that a tempo command takes effect on its own row (the groove depends on it; `--gt-tempo speed` does not),
+that wavetable right column `0x80` ("no change") and `0x00` (+0) behave as assumed, that relative notes cannot go below the note (an arpeggio below it is written lower and counted up), and the pulse speed range. Not built: the filter (as a filter table), slides (as portamento), volume (as sustain), stereo (two SIDs).

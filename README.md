@@ -31,7 +31,7 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `mml.py` | the tune language: parser, `Tune`, `Note`, the instrument / pattern / effect / scale / sample library |
 | `synth.py`, `synthfx.py` | the voices, envelopes, effects, filter; the shared echo and reverb bus |
 | `dpcm.py` | WAV to NES-style delta samples, the `.dpcm` file format (`python -m chipsynth.dpcm demo|convert`) |
-| `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report; `formats.goattracker.load(bytes)` likewise |
+| `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report; `formats.goattracker.load(bytes)` likewise; the writers are `formats.famistudio_export.dump(tune)` and `formats.goattracker_export.dump(tune)` -> file, report |
 | `midi.py` | Standard MIDI files: `to_midi(tune)`, `from_midi(bytes, voices=None)` -> Song (a voice per part, up to 16; `voices=N` folds the rest into gaps) |
 | `songedit.py` | `Editor`: note-level edits of a Song (add, erase, pitch, resize, move) with undo / redo |
 | `song.py`, `songmml.py` | the `Song` model (clips, repeats, calls kept as objects), `Song.compile()` to a `Tune`, MML import / export: `Song.from_mml(text)`, `song.to_mml()` |
@@ -95,14 +95,14 @@ Enter and Esc work it from the keyboard. The shortcuts keep working with or with
 | Open... (Ctrl+O), Open from packages... | a `.csp` / `.mml` / `.mid` file chooser; the Songs list of the loaded packages |
 | Save (Ctrl+S), Save As... (Ctrl+Shift+S) | as before: `.csp` writes a package, `.mml` text, `.mid` a MIDI export |
 | Import > MML, MIDI, FamiStudio text (.txt), GoatTracker 2 (.sng), WAV sample | the same readers as `python -m chipsynth import` |
-| Export > WAV, MIDI (Ctrl+E), MML, FamiStudio text (.txt), Package copy (.csp) | the same writer as `python -m chipsynth export-song`, for the song as it is now (unsaved edits included) |
+| Export > WAV, MIDI (Ctrl+E), MML, FamiStudio text (.txt), GoatTracker 2 (.sng), Package copy (.csp) | the same writer as `python -m chipsynth export-song`, for the song as it is now (unsaved edits included) |
 | Last report... | shows the latest import / export report again |
 
 What a conversion approximated or left out is never silent: the status line counts it, and a short report window lists
 every line (a clean conversion needs no window). Dropping a `.sng`, `.txt` or `.wav` on the window imports it too.
 
 * **WAV** export asks for the trips round the loop, normalizing to -1 dBFS, and the whole song or just the selected notes;
-  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL; **GoatTracker** import asks the region
+  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL; **GoatTracker** export asks PAL or NTSC, the multispeed and the tempo mode (see below); **GoatTracker** import asks the region
   (the file does not record it), the multispeed and which subtune; a FamiStudio file with several songs asks which.
 * **One song** from a FamiStudio or GoatTracker file opens as a new unsaved song (Save asks where to put it), like a
   MIDI file. **Several songs** are written into a `.csp` package as `import` does: the open song's package when it has
@@ -127,7 +127,7 @@ and `COMMAND -h` give every option.
 | `import PKG.csp FILE.mml...` | add songs to a package (created if missing). `--id NAME` names the song, `--shared` adds a library file's instruments / fx / scales / samples to the package, `--no-replace` refuses an id already there, `--lib DIR` / `--samples DIR` say where a game's `music/lib` and `.dpcm` files are. `.mid` files work too, and so do FamiStudio text files (`.txt`, from File > Export > FamiStudio Text; `--song NAME`, `--region ntsc|pal`, `--report FILE`), and so do GoatTracker 2 songs (`.sng`; `--song N` is the subtune, `--region pal|ntsc` defaults to pal, `--multispeed 1|2|4`, `--report FILE`: the file records none of these) |
 | `list SOURCE...` | the components of `.csp` / `.mml` / folders: `--type song,sample,...` (aliases `instr`, `key`), `--name 'd*'` (a glob; `TYPE:NAME` for one type) |
 | `export PKG.csp` | components as MML: `-d DIR` (songs as `ID.mml`, the rest in `lib/PACKAGE.mml`, samples in `samples/NAME.dpcm`, which is a game's `music/` layout), or `-o FILE` (`-` for stdout) for one thing; `--type` / `--name` choose; `--midi` writes songs as `.mid`. With no `--type`: songs and the shared parts |
-| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml` or `csp` (from OUT's ending, or `-f`). `render` is the same command |
+| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml`, `csp`, `famistudio` (`.txt`) or `goattracker` (`.sng`) (from OUT's ending, or `-f`). `render` is the same command. FamiStudio: `--region ntsc|pal`, `--fs-version X.Y.Z`. GoatTracker: V1-V3 only; `--region pal|ntsc` (default pal, as the importer), `--multispeed 1|2|4`, `--gt-tempo exact|speed`; what it left out or approximated is printed |
 | `generate`, `dump`, `build` | as before |
 
 `export-song` options for a **WAV** (any of them with another format is an error):
@@ -148,6 +148,19 @@ and `COMMAND -h` give every option.
 A song exported as MML (`export`, or `export-song -f mml`) declares the package samples it plays under `[sample]` and writes
 them as `samples/NAME.dpcm` beside it; import it with `--samples samples` to get the same package back. In Python the same
 work is `components.py` (`components`, `select`, `export_mml`, `import_mml`) and `exporter.py` (`export_song`, `AudioOptions`).
+
+A song exported as **GoatTracker 2** keeps V1-V3 as the three SID voices, with notes, rests, key-offs, the loop point and the tempo,
+and each instrument's ADSR, waveform and pulse width; an arpeggio, a pulse-width sweep and vibrato become a wavetable, a pulse
+table and a speed table entry. More voices, the DACs, echo, reverb, volume, pan, slides and the filter are left out, and every
+change is printed. The file does not record PAL or NTSC or the multispeed, so open it in the importer (or play it) with the same
+settings:
+
+    python -m chipsynth export-song music/forest.csp:dawn -o dawn.sng --region pal --multispeed 1
+    python -m chipsynth import music/back.csp dawn.sng --region pal --multispeed 1
+
+`--gt-tempo exact` (the default) changes the speed on the rows that need it when the song's tempo is not a whole number of frames
+a row, so every note starts on the nearest frame; `--gt-tempo speed` writes one speed (a whole number of frames a row) and says how
+far the tempo is out. A row lasts at least 3 frames, so a very fast song is moved to coarser rows (or use `--multispeed 2`).
 
 ## Tests
 

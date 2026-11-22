@@ -29,6 +29,7 @@ EXPORTS = {
     "mid": ("MIDI file...  Ctrl+E", "Export MIDI", "*.mid", ".mid"),
     "mml": ("MML text...", "Export MML", "*.mml", ".mml"),
     "famistudio": ("FamiStudio text (.txt)...", "Export FamiStudio text", "*.txt", ".txt"),
+    "goattracker": ("GoatTracker 2 (.sng)...", "Export GoatTracker song", "*.sng", ".sng"),
     "csp": ("Package copy (.csp)...", "Export a one-song package", "*.csp", ".csp"),
 }
 
