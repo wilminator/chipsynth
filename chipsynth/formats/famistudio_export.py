@@ -2,11 +2,9 @@
 
 V1, V2 -> Square 1, 2; V3 -> Triangle; V4 -> Noise; D1 -> DPCM.  Everything else the song holds (more voices, more
 DACs, echo, reverb, filter, vibrato, slide, pan, pulse-width sweeps, tempo changes) is dropped and said so in the Report.
-The volume ADSR and the arpeggio are sampled at the frame rate into FamiStudio envelopes.  The file says it was written
-by FamiStudio `version`, because FamiStudio only reads files whose version starts like its own.  Which version to write
-is the author's call: DEFAULT_VERSION below is the one place chipsynth names one, `None` leaves the attribute out (newer
-FamiStudio sources skip the check then), and `reference_version(text)` takes the exact string from a file the author's own
-FamiStudio wrote.
+The volume ADSR and the arpeggio are sampled at the frame rate into FamiStudio envelopes.  The file carries no
+Version attribute: FamiStudio versions keep moving, and a FamiStudio that has dropped its version check takes such a file as its own
+(a release that still demands one, like 4.2.0, refuses it: upgrade FamiStudio).  The older stamping code is in legacy/famistudio_version.py.
 """
 import math
 
@@ -16,7 +14,6 @@ from .envelope import FRAME_HZ, adsr
 from .famistudio_text import DUTY_PW, NOTE_NAMES, PAL_HZ, FamiStudioError, noise_pitch, split_line
 from .report import Report
 
-DEFAULT_VERSION = "4.5.3"                            # the Version stamped when nothing else is asked for: change it here only
 PPQ = 96
 MAX_PATTERN_ROWS = 64
 GRIDS = (24, 12, 8, 6, 4, 3, 2, 1)                  # ticks a row can last: 96 / g rows to a beat
@@ -33,36 +30,18 @@ def note_name(value):
     return "%s%d" % (NOTE_NAMES[(value - 1) % 12], (value - 1) // 12)
 
 
-def reference_version(text):
-    """The exact Version string on the Project line (the first line) of a FamiStudio text file, or None when the line has
-    none.  Raises FamiStudioError when the text is not a FamiStudio text file."""
-    for line in text.lstrip("\ufeff").splitlines():
-        if line.strip():
-            got = split_line(line)
-            if got and got[0] == "Project":
-                return got[1].get("Version") or None
-            break
-    raise FamiStudioError("this is not a FamiStudio text file (its first line is not a Project line)")
+STAMP_NOTE = ("no Version attribute written: a FamiStudio that has dropped its version check opens the file; a release that still "
+              "demands one (for example 4.2.0) refuses it, and the fix is to upgrade FamiStudio")
 
 
-def stamp_note(version):
-    """The Report line that says which stamp was written and why another might be needed."""
-    if version is None:
-        return ("no Version attribute written: newer FamiStudio sources then skip their version check, but a release that still "
-                "demands one (for example 4.2.0) refuses the file; if yours does, export again with a reference file or the version it names")
-    return ('Version="%s" written. FamiStudio opens a text file only when the first two numbers of its Version match its own; '
-            "if yours says the file is from an incompatible version, export again with a reference file from your FamiStudio, "
-            "the version it shows typed in, or None" % version)
-
-
-def dump(tune, region="ntsc", version=DEFAULT_VERSION, name=None):
-    """A compiled Tune -> (FamiStudio text, Report).  `version` None leaves the Version attribute out."""
-    return _Writer(tune, region, version, name).run()
+def dump(tune, region="ntsc", name=None):
+    """A compiled Tune -> (FamiStudio text, Report).  No Version attribute is written."""
+    return _Writer(tune, region, name).run()
 
 
 class _Writer:
-    def __init__(self, tune, region, version, name):
-        self.t, self.version, self.name = tune, version, name
+    def __init__(self, tune, region, name):
+        self.t, self.name = tune, name
         self.pal = region == "pal"
         self.hz = PAL_HZ if self.pal else FRAME_HZ
         self.r = Report()
@@ -211,7 +190,7 @@ class _Writer:
         chans = [self.melodic(i, g, plen, npat, nl) for i in range(4)]
         dpcm_lines, dpcm_chan, samples = self.dpcm(g, plen, npat, nl)
 
-        out = ["Project" + (_attr("Version", self.version) if self.version else "") + _attr("TempoMode", "FamiStudio")
+        out = ["Project" + _attr("TempoMode", "FamiStudio")
                + (_attr("Name", self.name or t.title) if (self.name or t.title) else "")
                + (_attr("Author", t.author) if t.author else "") + (_attr("Copyright", t.comment) if t.comment else "")
                + (_attr("PAL", "true") if self.pal else "")]
@@ -226,7 +205,7 @@ class _Writer:
             out.append("\t\tChannel" + _attr("Type", ctype))
             out += lines
         r.note("%s timing, %d row%s a pattern" % ("PAL" if self.pal else "NTSC", plen, "" if plen == 1 else "s"))
-        r.note(stamp_note(self.version))
+        r.note(STAMP_NOTE)
         return "\n".join(out) + "\n", r
 
     def rows(self, items, g, nl, total_rows):

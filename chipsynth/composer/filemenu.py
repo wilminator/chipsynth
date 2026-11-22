@@ -14,7 +14,6 @@ How a multi-song import behaves (FamiStudio songs, GoatTracker and SID-Wizard su
     same ids are replaced).  The first of them opens.  The options dialog says where they will go.
 Anything that replaces the open song first asks about unsaved edits (guard_switch).
 """
-import re
 from pathlib import Path
 
 import pygame
@@ -426,22 +425,8 @@ class FileMenu:
                               note="Trips only count when the song loops; the last notes ring for 2 seconds.",
                               apply=lambda v: self.export_choose(fmt, **v))
             return True
-        if fmt == "famistudio":
-            pr = self.prefs
-            stamps = [("default", "%s (chipsynth's default)" % exporter.DEFAULT_FS_VERSION),
-                      ("reference", "Reference file..." + ((": " + Path(pr.fs_ref).name) if pr.fs_ref else "")),
-                      ("typed", "Typed: %s" % pr.fs_typed if pr.fs_typed else "Type a version..."),
-                      ("none", "None (leave Version out)")]
-            self.show_options("Export FamiStudio text",
-                              [("region", "Timing", [("ntsc", "NTSC"), ("pal", "PAL")], 0),
-                               ("stamp", "Version", stamps, [k for k, _ in stamps].index(pr.fs_stamp))],
-                              ok="Choose file...",
-                              note="V1-V4 and one DPCM track only; what is left out is reported. FamiStudio refuses a file stamped "
-                                   "with another version than its own: Reference file takes the Version from a file your FamiStudio exported.",
-                              apply=self.export_famistudio_stamped)
-            return True
-        if fmt == "famitracker":
-            self.show_options("Export FamiTracker text",
+        if fmt in ("famistudio", "famitracker"):
+            self.show_options("Export %s text" % ("FamiStudio" if fmt == "famistudio" else "FamiTracker"),
                               [("region", "Timing", [("ntsc", "NTSC"), ("pal", "PAL")], 0)],
                               ok="Choose file...", note="V1-V4 and one DPCM track only; what is left out is reported.",
                               apply=lambda v: self.export_choose(fmt, **v))
@@ -455,34 +440,6 @@ class FileMenu:
                               apply=lambda v: self.export_choose(fmt, **v))
             return True
         return self.export_choose(fmt)
-
-    def export_famistudio_stamped(self, v):
-        """The FamiStudio options were accepted: settle the Version (a reference file to choose or a version to type),
-        remember the choice in the settings, then choose the file to write."""
-        pr, kind, region = self.prefs, v["stamp"], v["region"]
-
-        def go(**stamp):
-            pr.fs_stamp = kind
-            self.dirty = True
-            return self.export_choose("famistudio", region=region, **stamp)
-
-        if kind == "reference":
-            start = str(Path(pr.fs_ref).parent) if pr.fs_ref else None
-            ref = self.choose_path(False, "A text file exported by your FamiStudio", "*.txt", initialdir=start)
-            if not ref:
-                return False
-            pr.fs_ref = ref
-            return go(fs_reference=ref)
-        if kind == "typed":
-            def typed(text):
-                if not re.fullmatch(r"\d+(\.\d+){1,3}", text):
-                    self.say("A version looks like 4.2.0 (numbers and dots), not '%s'." % text, 6.0)
-                    return False
-                pr.fs_typed = text
-                return go(fs_version=text)
-            self.ask("FamiStudio version to write (e.g. 4.2.0)", pr.fs_typed or exporter.DEFAULT_FS_VERSION, typed)
-            return True
-        return go(fs_version=None if kind == "none" else exporter.DEFAULT_FS_VERSION)
 
     def export_choose(self, fmt, **opts):
         _, title, pattern, ext = fo.EXPORTS[fmt]
@@ -498,8 +455,7 @@ class FileMenu:
         pkg.add_song(sid, self.song, self.ed.lib)
         return pkg, sid
 
-    def export_as(self, fmt, path, loops=0, normalize=False, part="song", region=None,
-                  fs_version=exporter.DEFAULT_FS_VERSION, fs_reference=None, multispeed=1, gt_tempo="exact"):
+    def export_as(self, fmt, path, loops=0, normalize=False, part="song", region=None, multispeed=1, gt_tempo="exact"):
         """Write the open song to `path` as wav, mid, mml, famistudio, famitracker, goattracker or csp with exporter.export_song, the code
         `python -m chipsynth export-song` runs.  A file it replaces is copied to backups first.  Returns True."""
         if self.song is None:
@@ -521,8 +477,7 @@ class FileMenu:
             pkg, sid = self.export_package()
             if fmt != "mml":
                 backup_file(self.root or path.parent, path)
-            r = exporter.export_song(pkg, sid, path, opts, fmt, lib=self.ed.lib, region=region,
-                                fs_version=fs_version, fs_reference=fs_reference, multispeed=multispeed, gt_tempo=gt_tempo)
+            r = exporter.export_song(pkg, sid, path, opts, fmt, lib=self.ed.lib, region=region, multispeed=multispeed, gt_tempo=gt_tempo)
         except (exporter.ExportError, PackageError, SongError, mml.MMLError, OSError) as e:
             self.say("Can't export %s: %s" % (path.name, e), 8.0)
             return False

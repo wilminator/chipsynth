@@ -39,7 +39,7 @@
                                   one song as wav, mid, mml, csp, famistudio (a .txt FamiStudio can import; famitracker is FamiTracker's text export, read by
                                   FamiTracker and by FamiStudio (File > Import > FamiTracker Text) in any version, V1-V4 and D1 only: end the
                                   name in .ftm.txt or say -f famitracker (a plain .txt means famistudio); --region ntsc|pal is its option;
-                                  V1-V4 and D1 only; --region ntsc|pal, --fs-version X.Y.Z|none, --fs-reference FILE; what it left out is printed) or
+                                  V1-V4 and D1 only; --region ntsc|pal; no Version is written; what it left out is printed) or
                                   goattracker (a .sng GoatTracker 2 opens: V1-V3 only; --region pal|ntsc (default pal),
                                   --multispeed 1|2|4, --gt-tempo exact|speed; what it left out is printed) (from OUT's ending, or --format)
                                     wav only: --volume V (0.5, 50%, -6dB)  --normalize [--peak DB, default -1]
@@ -551,9 +551,6 @@ def export_song_cmd(args):
     p.add_argument("--gt-tempo", choices=("exact", "speed"), default="exact",
                    help="(goattracker) exact: change the speed on the rows that need it, so the timing is exact; "
                         "speed: one whole number of frames a row, as a tracker song usually has, at the cost of the tempo")
-    p.add_argument("--fs-version", metavar="X.Y.Z", default=exporter.DEFAULT_FS_VERSION,
-                   help="(famistudio) the version the file says it is from, or 'none' to leave the Version out (default %s)" % exporter.DEFAULT_FS_VERSION)
-    p.add_argument("--fs-reference", metavar="FILE", help="(famistudio) a text file exported by your own FamiStudio: its exact Version is used")
     add_library_options(p)
     a = p.parse_args(glue(args, "--volume", "--peak"))
     src, song = exporter.split_source(a.source)
@@ -564,7 +561,7 @@ def export_song_cmd(args):
     opts = exporter.AudioOptions(volume=exporter.gain(a.volume), normalize=a.normalize, peak_db=exporter.decibels(a.peak),
                                  start=exporter.frames(a.start), end=exporter.frames(a.end) if a.end else None,
                                  loops=a.loops, tail=a.tail)
-    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib, a.region, a.fs_version, a.fs_reference, a.multispeed, a.gt_tempo)
+    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib, a.region, a.multispeed, a.gt_tempo)
     for w in r.written:
         print("wrote", w, *(["(%.2fs, peak %s)" % (r.seconds, "silent" if r.peak_db is None else "%.1f dBFS" % r.peak_db)]
                             if r.format == "wav" and w == r.path else []))

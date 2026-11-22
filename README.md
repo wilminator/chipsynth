@@ -161,7 +161,7 @@ What a conversion approximated or left out is never silent: the status line coun
 every line (a clean conversion needs no window). Dropping a `.sng`, `.sf2`, `.swm`, `.txt`, `.fms` or `.wav` on the window imports it too.
 
 * **WAV** export asks for the trips round the loop, normalizing to -1 dBFS, and the whole song or just the selected notes;
-  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL and which Version to stamp (the default, a Reference file..., a typed version, or None; the last choice is remembered; see "FamiStudio versions" below); **FamiTracker** export asks NTSC or PAL; **GoatTracker** export asks PAL or NTSC, the multispeed and the tempo mode (see below); **GoatTracker** import asks the region
+  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL (no Version is written; see "FamiStudio versions" below); **FamiTracker** export asks NTSC or PAL; **GoatTracker** export asks PAL or NTSC, the multispeed and the tempo mode (see below); **GoatTracker** import asks the region
   (the file does not record it), the multispeed and which subtune; a FamiStudio or Furnace file with several songs asks which; **SID Factory II** import asks the timing (as the file says, NTSC or PAL) and which song; a **SID-Wizard** import asks the region and the subtune (the file records its own frame speed).
 * **One song** from a FamiStudio, Furnace, GoatTracker or SID-Wizard file opens as a new unsaved song (Save asks where to put it), like a
   MIDI file. **Several songs** are written into a `.csp` package as `import` does: the open song's package when it has
@@ -194,30 +194,16 @@ every line (a clean conversion needs no window). Dropping a `.sng`, `.sf2`, `.sw
 * Import MML makes an unsaved copy (Open edits the file itself). Export over an existing file keeps a copy in `backups/`.
 
 In Python the menu's work is methods that take a path (no file dialog): `Composer.import_file(path, kind, region=,
-multispeed=, song=, package=)`, `Composer.export_as(fmt, path, loops=, normalize=, part=, region=, fs_version=, fs_reference=)` and `new_blank()`,
+multispeed=, song=, package=)`, `Composer.export_as(fmt, path, loops=, normalize=, part=, region=, multispeed=, gt_tempo=)` and `new_blank()`,
 over the window-free helpers in `composer/fileops.py`.
 
 ### FamiStudio versions
 
-FamiStudio's text format only loads in a FamiStudio whose version matches the one that wrote the file (its first two
-numbers; newer sources skip the check when the file has no `Version` at all). Versions keep moving, so chipsynth
-names one in one place only, `DEFAULT_VERSION` in `chipsynth/formats/famistudio_export.py` (4.5.3), and lets you
-override it. To find the setting for your FamiStudio, save any project with File > Export > FamiStudio Text, then:
-
-```
-python -m chipsynth export-song SONG.csp -o OUT.txt --fs-reference FROM_YOUR_FAMISTUDIO.txt
-```
-
-copies the exact Version string from that file (the report says if the file has none, and refuses a file that is not
-FamiStudio text). Or type the version yourself, or leave it out:
-
-```
-python -m chipsynth export-song SONG.csp -o OUT.txt --fs-version 4.2.0
-python -m chipsynth export-song SONG.csp -o OUT.txt --fs-version none
-```
-
-The composer's File > Export > FamiStudio text dialog has the same three choices and remembers the last one. The
-chipsynth importer reads files with or without a Version. The export report always says which stamp was written.
+The FamiStudio text export writes no `Version` attribute. FamiStudio's text format used to load only in the release that wrote it;
+newer FamiStudio sources take a file with no `Version` as their own version, so one file opens in whichever FamiStudio you run.
+A release that still demands a version (4.2.0 does) refuses the file: upgrade FamiStudio. The export report says so, and the
+chipsynth importer reads files with or without a Version. The older stamping code (default, typed, reference file) is kept in
+`legacy/famistudio_version.py`.
 
 ### Effects and key changes on notes
 
@@ -256,7 +242,7 @@ and `COMMAND -h` give every option.
 | `import PKG.csp FILE.mml...` | add songs to a package (created if missing). `--id NAME` names the song, `--shared` adds a library file's instruments / fx / scales / samples to the package, `--no-replace` refuses an id already there, `--lib DIR` / `--samples DIR` say where a game's `music/lib` and `.dpcm` files are. `.mid` files work too, and so do FamiStudio text files (`.txt`, from File > Export > FamiStudio Text; `--song NAME`, `--region ntsc|pal`, `--report FILE`) and FamiStudio projects (`.fms`, formats 15 to 19 = FamiStudio 4.1 to 4.5, same options), and so do GoatTracker 2 songs (`.sng`; `--song N` is the subtune, `--region pal|ntsc` defaults to pal, `--multispeed 1|2|4`, `--report FILE`: the file records none of these; the pattern commands, wavetables, pulse tables and the filter are carried over where chipsynth can play them, and the report lists what is approximated or left out), and SID Factory II songs (`.sf2`; `--song N` is the song, `--region pal|ntsc` overrides the PAL / NTSC the file records, `--report FILE`), and SID-Wizard songs (`.swm`; `--song N`, `--region pal|ntsc` (default pal: the file does not say), `--report FILE`), and Furnace modules (`.fur`; `--song NAME|N` picks a subsong, `--report FILE`: NES, C64 SID and Game Boy pulse channels) |
 | `list SOURCE...` | the components of `.csp` / `.mml` / folders: `--type song,sample,...` (aliases `instr`, `key`), `--name 'd*'` (a glob; `TYPE:NAME` for one type) |
 | `export PKG.csp` | components as MML: `-d DIR` (songs as `ID.mml`, the rest in `lib/PACKAGE.mml`, samples in `samples/NAME.dpcm`, which is a game's `music/` layout), or `-o FILE` (`-` for stdout) for one thing; `--type` / `--name` choose; `--midi` writes songs as `.mid`. With no `--type`: songs and the shared parts |
-| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml`, `csp`, `famistudio` (`.txt`), `famitracker` (`.ftm.txt`; a plain `.txt` is `famistudio`, so a FamiTracker file ends in `.ftm.txt` or needs `-f famitracker`) or `goattracker` (`.sng`) (from OUT's ending, or `-f`). `render` is the same command. FamiStudio: `--region ntsc|pal`, `--fs-version X.Y.Z`. GoatTracker: V1-V3 only; `--region pal|ntsc` (default pal, as the importer), `--multispeed 1|2|4`, `--gt-tempo exact|speed`; what it left out or approximated is printed |
+| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml`, `csp`, `famistudio` (`.txt`), `famitracker` (`.ftm.txt`; a plain `.txt` is `famistudio`, so a FamiTracker file ends in `.ftm.txt` or needs `-f famitracker`) or `goattracker` (`.sng`) (from OUT's ending, or `-f`). `render` is the same command. FamiStudio: `--region ntsc|pal`. GoatTracker: V1-V3 only; `--region pal|ntsc` (default pal, as the importer), `--multispeed 1|2|4`, `--gt-tempo exact|speed`; what it left out or approximated is printed |
 | `generate`, `dump`, `build` | as before |
 
 `export-song` options for a **WAV** (any of them with another format is an error):
