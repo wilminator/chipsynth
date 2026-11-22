@@ -220,16 +220,16 @@ class FileMenu:
         several songs...), then import_file.  Formats that need nothing import at once."""
         kind = kind or fo.kind_of(path)
         if kind is None:
-            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker) or .wav." % Path(path).name, 8.0)
+            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker), .fur (Furnace) or .wav." % Path(path).name, 8.0)
             return False
-        if kind not in ("famistudio", "goattracker"):
+        if kind not in ("famistudio", "goattracker", "furnace"):
             return self.import_file(path, kind)
         try:
             names = fo.song_names(kind, path)
         except fo.FileOpError as e:
             self.say("Can't import: %s" % e, 8.0)
             return False
-        if kind == "famistudio" and len(names) < 2:
+        if kind in ("famistudio", "furnace") and len(names) < 2:
             return self.import_file(path, kind)
         if len(names) > 1:
             songs = [("", "All %d songs" % len(names))] + [(str(i + 1), n) for i, n in enumerate(names)]
@@ -243,13 +243,15 @@ class FileMenu:
         if kind == "famistudio":
             rows = [("region", "Timing", [(None, "as the file says"), ("ntsc", "NTSC"), ("pal", "PAL")], 0),
                     ("song", "Songs", songs, 0)]
+        elif kind == "furnace":
+            rows = [("song", "Subsongs", songs, 0)]
         else:
             rows = [("region", "Region", [("pal", "PAL (50 Hz)"), ("ntsc", "NTSC (60 Hz)")], 0),
                     ("multispeed", "Multispeed", [(1, "x1"), (2, "x2"), (4, "x4")], 0),
                     ("song", "Subtune", songs, 0)]
             note = ("The file does not record its region or multispeed. " + note).strip()
         self.show_options("Import %s" % Path(path).name, rows, ok="Import", note=note, apply=lambda v: self.import_file(
-            path, kind, region=v["region"], multispeed=v.get("multispeed", 1), song=v["song"] or None))
+            path, kind, region=v.get("region"), multispeed=v.get("multispeed", 1), song=v["song"] or None))
         return True
 
     def package_path(self):
@@ -275,8 +277,8 @@ class FileMenu:
             return self.open_path(path, guard=guard)
         if kind == "mml":
             return self.import_mml(path, guard)
-        if kind not in ("famistudio", "goattracker"):
-            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker) or .wav." % path.name, 8.0)
+        if kind not in ("famistudio", "goattracker", "furnace"):
+            self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker), .fur (Furnace) or .wav." % path.name, 8.0)
             return False
         try:
             loaded = fo.read_import(kind, path, self.lib, region=region, multispeed=multispeed, song=song)
@@ -308,7 +310,7 @@ class FileMenu:
     def apply_import(self, loaded, kind, target):
         """Put read songs in the window (one song) or into a package file (several); show the report."""
         lines = fo.report_lines(loaded.report)
-        label = "FamiStudio" if kind == "famistudio" else "GoatTracker"
+        label = {"famistudio": "FamiStudio", "furnace": "Furnace"}.get(kind, "GoatTracker")
         if len(loaded.songs) == 1:
             sid, song, samples, title = loaded.songs[0]
             lib = None

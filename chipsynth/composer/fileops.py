@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from chipsynth import package as pk
-from chipsynth.formats import goattracker, famistudio_text as fam
+from chipsynth.formats import furnace, goattracker, famistudio_text as fam
 from chipsynth.formats.report import Report
 
 # kind -> (menu label, dialog title, file patterns, suffixes it is recognised by)
@@ -21,6 +21,7 @@ IMPORTS = {
     "mid": ("MIDI file...", "Import MIDI", "*.mid *.midi", (".mid", ".midi")),
     "famistudio": ("FamiStudio text (.txt)...", "Import FamiStudio text", "*.txt", (".txt",)),
     "goattracker": ("GoatTracker 2 (.sng)...", "Import GoatTracker song", "*.sng", (".sng",)),
+    "furnace": ("Furnace module (.fur)...", "Import Furnace module", "*.fur", (".fur",)),
     "wav": ("WAV sample...", "Import a WAV as a drum sample", "*.wav", (".wav",)),
 }
 # format -> (menu label, dialog title, file pattern, default extension)
@@ -68,7 +69,7 @@ def _read_bytes(path):
 
 
 def song_names(kind, path):
-    """The names of the songs a FamiStudio or GoatTracker file holds (empty for other kinds), in file order."""
+    """The names of the songs a FamiStudio, GoatTracker or Furnace file holds (empty for other kinds), in file order."""
     name = Path(path).name
     try:
         if kind == "famistudio":
@@ -82,13 +83,19 @@ def song_names(kind, path):
                 raise FileOpError("%s is not a GoatTracker song (it should start with GTS5)" % name)
             tune = goattracker.parse(data)
             return ["subtune %d" % (i + 1) for i in range(len(tune.orders))]
-    except (fam.FamiStudioError, goattracker.GoatTrackerError) as e:
+        if kind == "furnace":
+            data = _read_bytes(path)
+            if not furnace.looks_like(data):
+                raise FileOpError("%s is not a Furnace module (it should start with -Furnace module-)" % name)
+            mod = furnace.parse(data)
+            return [s.name or "song %d" % (i + 1) for i, s in enumerate(mod.subsongs)]
+    except (fam.FamiStudioError, goattracker.GoatTrackerError, furnace.FurnaceError) as e:
         raise FileOpError("%s: %s" % (name, e))
     return []
 
 
 def read_import(kind, path, lib=None, region=None, multispeed=1, song=None):
-    """A FamiStudio or GoatTracker file -> Loaded.  `song` picks one (FamiStudio: a name or number; GoatTracker: the
+    """A FamiStudio, GoatTracker or Furnace file -> Loaded.  `song` picks one (FamiStudio: a name or number; GoatTracker: the
     subtune number).  Song ids follow the command line: the file name, with _NAME (or _N) added when it holds several."""
     name = Path(path).name
     stem = pk.Package.safe_id(Path(path).stem)
@@ -112,6 +119,15 @@ def read_import(kind, path, lib=None, region=None, multispeed=1, song=None):
             out.report = res.report
             for n, imp in enumerate(res.songs, 1):
                 sid = stem if len(res.songs) == 1 else "%s_%d" % (stem, sub or n)
+                out.songs.append((sid, imp.song, imp.samples, imp.name))
+        elif kind == "furnace":
+            data = _read_bytes(path)
+            if not furnace.looks_like(data):
+                raise FileOpError("%s is not a Furnace module (it should start with -Furnace module-)" % name)
+            res = furnace.load(data, song=song)
+            out.report = res.report
+            for n, imp in enumerate(res.songs, 1):
+                sid = stem if len(res.songs) == 1 else "%s_%s" % (stem, pk.Package.safe_id(imp.name, "song%d" % n))
                 out.songs.append((sid, imp.song, imp.samples, imp.name))
         else:
             raise FileOpError("don't know how to import a '%s' file here" % kind)

@@ -494,8 +494,8 @@ class Composer(FileMenu):
         elif t == getattr(pygame, "DROPFILE", -1):
             if str(e.file).lower().endswith(".wav"):
                 self.import_wav(e.file)
-            elif str(e.file).lower().endswith((".sng", ".txt")):
-                self.import_begin(e.file)                  # GoatTracker / FamiStudio: asks for the options it needs
+            elif str(e.file).lower().endswith((".sng", ".txt", ".fur")):
+                self.import_begin(e.file)                  # GoatTracker / FamiStudio / Furnace: asks for the options it needs
             else:
                 self.open_path(e.file)
 
