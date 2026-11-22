@@ -32,7 +32,7 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `synth.py`, `synthfx.py` | the voices, envelopes, effects, filter; the shared echo and reverb bus |
 | `dpcm.py` | WAV to NES-style delta samples, the `.dpcm` file format (`python -m chipsynth.dpcm demo|convert`) |
 | `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report; `formats.goattracker.load(bytes)` likewise |
-| `midi.py` | Standard MIDI files: `to_midi(tune)`, `from_midi(bytes, voices=None)` -> Song (a voice per part, up to 16; `voices=N` folds the rest into gaps) |
+| `midi.py` | Standard MIDI files: `to_midi(tune)`, `from_midi(bytes, voices=None)` -> Song (a voice per part, up to 16; `voices=N` folds the rest into gaps; channel 10 drums go to D1 / D2) |
 | `songedit.py` | `Editor`: note-level edits of a Song (add, erase, pitch, resize, move) with undo / redo |
 | `song.py`, `songmml.py` | the `Song` model (clips, repeats, calls kept as objects), `Song.compile()` to a `Tune`, MML import / export: `Song.from_mml(text)`, `song.to_mml()` |
 | `package.py`, `packageset.py`, `packagetext.py` | the `.csp` package file (several songs + shared instruments / samples), `PackageSet` (load many, pick `package:song`), text dump / build |
@@ -58,12 +58,25 @@ mono, normalized to 0.98). Options, applied in this order (channel, trim, cut to
 | `--fade MS` | linear fade-out over the last MS milliseconds |
 | `--max-seconds S`, `--max-bytes N` | cut the recording to S seconds, or the result to N bytes per track |
 | `--truncate` | a result over the DPCM size cap (64 parts of 4081 bytes) is cut to fit instead of refused |
-| `--fit` | turn the level down until it follows cleanly (cleaner, quieter) |
+| `--gain DB` | change the level by DB dB after normalizing (default 0); a boost past full scale clips, and the report says so |
+| `--fit` / `--no-fit` | turn the level down until it follows cleanly (cleaner, quieter); off here, on for `import` and the composer |
 | `--preview` | print the size, duration, chosen rate and parts, and write nothing |
 
     python -m chipsynth.dpcm convert in.wav GAMEDIR --rate auto --channel left --trim --fade 50 --preview
 
-In Python: `dpcm.convert_wav(x, wav_rate, dpcm.ImportOptions(...))` returns `(Sample, notes)`, and `dpcm.preview(...)` returns
+`--rate` also takes the Hz of a table rate (`8363`). The DAC plays only the 16 NES DPCM rates (4182 to 33144 Hz): a higher
+rate is brighter and bigger (rate 15 is about 4.1 KB a second, rate 0 about 0.5 KB), a low one is dull and noisy but suits
+kicks and bass.
+
+The same options come in two more places, with the same defaults (rate 12, channels mixed, normalized, level fitted):
+
+    python -m chipsynth import music/forest.csp kick.wav --id kick --rate 7 --channel left --trim --gain -3
+
+adds the WAV to the package as a sample, and File > Import > WAV (or dropping a `.wav` on the composer) opens an options
+dialog with the same choices. Either one reports the rate, length, bytes and clipping (the status line, and Last report).
+
+In Python: `dpcm.convert_wav(x, wav_rate, dpcm.ImportOptions(...), name, stats)` returns `(Sample, notes)` (`stats` is
+filled with peak, clipped and frames; `dpcm.report_lines` words it), and `dpcm.preview(...)` returns
 the size, seconds, rate, parts and any error without writing. The maker's Sample import settings screen has the same
 options and shows that preview live.
 
@@ -114,6 +127,13 @@ every line (a clean conversion needs no window). Dropping a `.sng`, `.txt` or `.
   MIDI file. **Several songs** are written into a `.csp` package as `import` does: the open song's package when it has
   a `.csp` file, else `NAME.csp` beside the imported file (an existing file keeps its other songs, and the same ids are
   replaced, with a copy of the old file in `backups/`). The first of them opens. The options window says where they go.
+* **MIDI drums** (channel 10, General MIDI percussion) import onto the DAC lanes: kick, snare, hats, crash and toms play the
+  built-in kit samples (the note-to-sample table is `GM_DRUMS` in `chipsynth/midi.py`), velocity is the volume, kick / snare /
+  toms go on D1 and hats / crash on D2, and when two hits fall on the same moment the stronger keeps its lane and the other
+  moves to the free lane. Percussion the kit has no sample for (cowbell, congas, ...) and hits that fit on neither lane are
+  listed in the import report (in `python -m chipsynth import` as `warning:` lines), never dropped silently. Export writes
+  the kit hits of D1 / D2 as channel 10 notes (the shouted "hey", the pitched bass and your own samples have no MIDI drum
+  note and are reported as left out), so a round trip keeps the drums. A file without percussion imports exactly as before.
 * Anything that would replace the open song (New, Open, Import) first asks about unsaved edits: Save, Don't save, Cancel.
 * Import MML makes an unsaved copy (Open edits the file itself). Export over an existing file keeps a copy in `backups/`.
 

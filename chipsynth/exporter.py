@@ -253,7 +253,9 @@ def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region="ntsc"
             r.frames, r.written = len(audio), [path]
         elif fmt == "mid":
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(midi.to_midi(pkg.tune(song_id, lib)))
+            tune = pkg.tune(song_id, lib)
+            path.write_bytes(midi.to_midi(tune))
+            r.notes += midi.drum_hits(tune)[1]
             r.written = [path]
         elif fmt == "famistudio":
             fs_version, why = fs_stamp(fs_version, fs_reference)
