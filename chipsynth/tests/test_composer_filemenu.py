@@ -553,12 +553,28 @@ class ExportTests(Base):
         self.assertIn("PAL timing", " ".join(lines))
         a.frame()                                                    # the overlay draws
 
-    def test_midi_export_says_the_drum_lanes_are_not_in_it(self):
+    def test_midi_export_writes_the_drum_lanes_and_names_what_it_cannot(self):
         a = self.a
         song = Song.from_mml(musicgen.generate("town", 1, "", None, dac=True), a.lib)
         self.assertTrue(a.load_song(song, "Drums"))
         self.assertTrue(a.export_as("mid", self.dir / "d.mid"))
-        self.assertTrue(any(x.startswith("left out:") and "drum" in x for x in a.last_report[1]), a.last_report)
+        _, tracks = midi.parse((self.dir / "d.mid").read_bytes())
+        self.assertTrue(any(ev[1] == "on" and ev[4] == 9 for t in tracks for ev in t))
+        self.assertFalse(any("drum" in x for x in a.last_report[1]), a.last_report)
+        song = Song.from_mml("[sample]\nkit_hey = kit_hey\nV1: c1\nD1: kit_hey4\n", a.lib)
+        self.assertTrue(a.load_song(song, "Hey"))
+        self.assertTrue(a.export_as("mid", self.dir / "h.mid"))
+        self.assertTrue(any(x.startswith("warning:") and "kit_hey" in x for x in a.last_report[1]), a.last_report)
+
+    def test_opening_a_midi_with_drums_puts_them_on_d1_d2_and_reports_what_the_kit_lacks(self):
+        import struct
+        a = self.a
+        ev = b"".join(midi._varlen(d) + b for d, b in [(0, bytes([0x99, 36, 100])), (12, bytes([0x99, 36, 0])), (84, bytes([0x99, 56, 100])),
+                                                         (12, bytes([0x99, 56, 0]))]) + b"\x00\xff\x2f\x00"
+        data = midi._chunk(b"MThd", struct.pack(">HHH", 0, 1, 96)) + midi._chunk(b"MTrk", ev)
+        self.assertTrue(a.import_file(self.write("beat.mid", data)))
+        self.assertEqual(len(a.roll.dac[0]), 1)
+        self.assertTrue(any("Cowbell" in x for x in a.last_report[1]), a.last_report)
 
     def test_a_clean_export_just_reports_in_the_status_line(self):
         a = self.a

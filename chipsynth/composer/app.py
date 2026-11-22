@@ -292,7 +292,13 @@ class Composer(FileMenu):
                 song = midi.from_midi(p.read_bytes())
                 self.say("Imported %s: %d voice%s%s. Save to keep it." % (p.name, song.voices, "" if song.voices == 1 else "s",
                          "; " + song.warnings[0] if song.warnings else ""), 8.0)
-                return self.load_song(song, p.stem, "")
+                ok = self.load_song(song, p.stem, "")
+                if ok and song.warnings:                      # what was folded or left out (drums the kit cannot play...)
+                    self.show_report("Import of %s" % p.name, ["warning: " + w for w in song.warnings],
+                                     "Imported %s: %d voice%s, %d warning%s. Save to keep it."
+                                     % (p.name, song.voices, "" if song.voices == 1 else "s", len(song.warnings),
+                                        "" if len(song.warnings) == 1 else "s"))
+                return ok
             text = p.read_text(encoding="utf-8", errors="replace")
             song = Song.from_mml(text, self.lib)
             return self.load_song(song, song.title or p.stem, str(p))
@@ -1349,17 +1355,19 @@ class Composer(FileMenu):
         return bool(path) and self.export_midi(path)
 
     def export_midi(self, path):
-        """Write the song as a standard MIDI file (voices only; drums are left out)."""
+        """Write the song as a standard MIDI file (voices, and the kit drums of D1 / D2 as channel 10)."""
         if self.song is None:
             return False
         path = Path(path)
         try:
             from .files import save_with_backup
-            save_with_backup(self.root or path.parent, path, midi.to_midi(self.ed.tune))
+            tune = self.ed.tune
+            save_with_backup(self.root or path.parent, path, midi.to_midi(tune))
         except OSError as e:
             self.say("Can't write %s: %s" % (path.name, e), 8.0)
             return False
-        self.say("Exported %s (the four voices; drums are not included)." % path.name, 5.0)
+        left = midi.drum_hits(tune)[1]
+        self.say("Exported %s (the voices and the kit drums as channel 10)%s." % (path.name, "; " + left[0] if left else ""), 6.0)
         return True
 
     def ask(self, label, text, apply):
