@@ -121,7 +121,7 @@ What a conversion approximated or left out is never silent: the status line coun
 every line (a clean conversion needs no window). Dropping a `.sng`, `.txt` or `.wav` on the window imports it too.
 
 * **WAV** export asks for the trips round the loop, normalizing to -1 dBFS, and the whole song or just the selected notes;
-  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL; **GoatTracker** import asks the region
+  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL and which Version to stamp (the default, a Reference file..., a typed version, or None; the last choice is remembered; see "FamiStudio versions" below); **GoatTracker** import asks the region
   (the file does not record it), the multispeed and which subtune; a FamiStudio file with several songs asks which.
 * **One song** from a FamiStudio or GoatTracker file opens as a new unsaved song (Save asks where to put it), like a
   MIDI file. **Several songs** are written into a `.csp` package as `import` does: the open song's package when it has
@@ -138,8 +138,30 @@ every line (a clean conversion needs no window). Dropping a `.sng`, `.txt` or `.
 * Import MML makes an unsaved copy (Open edits the file itself). Export over an existing file keeps a copy in `backups/`.
 
 In Python the menu's work is methods that take a path (no file dialog): `Composer.import_file(path, kind, region=,
-multispeed=, song=, package=)`, `Composer.export_as(fmt, path, loops=, normalize=, part=, region=)` and `new_blank()`,
+multispeed=, song=, package=)`, `Composer.export_as(fmt, path, loops=, normalize=, part=, region=, fs_version=, fs_reference=)` and `new_blank()`,
 over the window-free helpers in `composer/fileops.py`.
+
+### FamiStudio versions
+
+FamiStudio's text format only loads in a FamiStudio whose version matches the one that wrote the file (its first two
+numbers; newer sources skip the check when the file has no `Version` at all). Versions keep moving, so chipsynth
+names one in one place only, `DEFAULT_VERSION` in `chipsynth/formats/famistudio_export.py` (4.5.3), and lets you
+override it. To find the setting for your FamiStudio, save any project with File > Export > FamiStudio Text, then:
+
+```
+python -m chipsynth export-song SONG.csp -o OUT.txt --fs-reference FROM_YOUR_FAMISTUDIO.txt
+```
+
+copies the exact Version string from that file (the report says if the file has none, and refuses a file that is not
+FamiStudio text). Or type the version yourself, or leave it out:
+
+```
+python -m chipsynth export-song SONG.csp -o OUT.txt --fs-version 4.2.0
+python -m chipsynth export-song SONG.csp -o OUT.txt --fs-version none
+```
+
+The composer's File > Export > FamiStudio text dialog has the same three choices and remembers the last one. The
+chipsynth importer reads files with or without a Version. The export report always says which stamp was written.
 
 ## Command line (`python -m chipsynth`)
 
