@@ -9,7 +9,10 @@
   build TEXT [-o PKG.csp]         assemble a package from a dump
   import PKG.csp FILE.mml ...     add songs (song id = file name, with `_` for anything an id may not hold) to a package, creating it if needed
                                   (FILE.mid works too; FILE.txt from FamiStudio's File > Export > FamiStudio Text works too;
-                                  so does a GoatTracker 2 FILE.sng)
+                                  so does a FamiStudio project FILE.fms (4.1 to 4.5); so does a GoatTracker 2 FILE.sng, and a SID Factory II FILE.sf2, and a SID-Wizard FILE.swm; a FILE.wav is added as a DAC sample: --rate R (index,
+                                  Hz or auto, default 12) --channel mix|left|right|stereo --trim [DB] --no-normalize
+                                  --gain DB --fade MS --max-seconds S --max-bytes N --truncate --no-fit; the result
+                                  is reported: rate, length, bytes, clipping)
                                     --id NAME     the song id, when there is one file
                                     --shared      the files are libraries ([instr] [fx] [key] [sample]): their
                                                   parts are added to the package for all its songs
@@ -17,21 +20,27 @@
                                     --samples DIR where NAME.dpcm files for [sample] are
                                     --no-replace  refuse a song id that is already in the package
                                     --voices N    (MIDI) make songs of N voices; the others' notes fill the gaps
+                                    --drum-lanes auto|N   (MIDI) DAC lanes for the channel 10 drums: auto (default)
+                                                  uses as many as the file needs (2-8), N allows at most N
                                     --song NAME   (FamiStudio) only this song (a name or a number); --region ntsc|pal
                                                   (GoatTracker: --song N is the subtune, --region pal|ntsc defaults to pal,
                                                   --multispeed 1|2|4, --report FILE; the file records none of these)
+                                                  (SID Factory II: --song N picks one of its songs, --region pal|ntsc
+                                                  overrides what the file says, --report FILE)
+                                                  (SID-Wizard: --song N is the subtune, --region pal|ntsc defaults to pal,
+                                                  --report FILE; the file records its own frame speed)
   export PKG.csp [options]        components as MML: each song as ID.mml, the rest in lib/PACKAGE.mml, DPCM samples
                                   in samples/NAME.dpcm (a game's music folder).  Without --type: songs and the
                                   package's shared parts.
                                     -d DIR   where to write (default .)   -o FILE   write one thing to FILE ('-' = stdout)
                                     --type T --name GLOB   which components   --midi   songs as .mid instead
   export-song SOURCE[:SONG] [SONG] -o OUT [options]      (also: render)
-                                  one song as wav, mid, mml, csp, famistudio or famitracker (from OUT's ending, or --format).
-                                  famistudio: a .txt FamiStudio imports; famitracker: FamiTracker's text export, read by
-                                  FamiTracker and by FamiStudio (File > Import > FamiTracker Text) in any version; end the
-                                  name in .ftm.txt or say -f famitracker (a plain .txt means famistudio).
-                                  Both: V1-V4 and D1 only, --region ntsc|pal (--fs-version X.Y.Z is famistudio's);
-                                  what the file left out is printed
+                                  one song as wav, mid, mml, csp, famistudio (a .txt FamiStudio can import; famitracker is FamiTracker's text export, read by
+                                  FamiTracker and by FamiStudio (File > Import > FamiTracker Text) in any version, V1-V4 and D1 only: end the
+                                  name in .ftm.txt or say -f famitracker (a plain .txt means famistudio); --region ntsc|pal is its option;
+                                  V1-V4 and D1 only; --region ntsc|pal, --fs-version X.Y.Z|none, --fs-reference FILE; what it left out is printed) or
+                                  goattracker (a .sng GoatTracker 2 opens: V1-V3 only; --region pal|ntsc (default pal),
+                                  --multispeed 1|2|4, --gt-tempo exact|speed; what it left out is printed) (from OUT's ending, or --format)
                                     wav only: --volume V (0.5, 50%, -6dB)  --normalize [--peak DB, default -1]
                                               --start T  --end T   (1.5 | 250ms | 1:05.5 | 88200f = frames)
                                               --loops N  (trips round the loop)  --tail SECONDS  (default 2)
@@ -40,6 +49,10 @@
                                     --dac         drums as samples on D1 / D2          (kick, snare, hats, crash, toms)
                                     --dac-bass    the bass as pitched samples on D2
                                     --voice       a rare one-shot "hey" on D1 (boss intro, turnarounds)
+                                    --echo --reverb --filter --vibrato --slide --sweep   the engine's effects, set per kind and
+                                                  mood (tempo-synced echo, a room, a filter, lead vibrato, portamento, pulse sweeps)
+                                    --fx          all six effects at once
+                                    --degrees     write the notes as scale degrees under a `key` line
                                     --samples DIR also write the kit's .dpcm files the tune uses into DIR
                                                   (a game's music/samples; the built-in kit needs no files)
                                     --wav FILE    also render the tune to a WAV
@@ -48,8 +61,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import components as comp, exporter, mml, midi, package as pk, packagetext
-from .formats import goattracker
+from . import components as comp, dpcm, exporter, mml, midi, package as pk, packagetext
+from .formats import famistudio_binary, goattracker, sf2, sidwizard
 from .packageset import PackageSet
 from .song import Song
 
@@ -67,10 +80,11 @@ def generate_cmd(args):
     from . import kit, musicgen
     out, samples, wav = opt(args, "-o"), opt(args, "--samples"), opt(args, "--wav")
     seed, mood, tempo = opt(args, "--seed"), opt(args, "--mood"), opt(args, "--tempo")
-    flags = {f: f in args for f in ("--dac", "--dac-bass", "--voice")}
-    args = [a for a in args if a not in flags]
+    flags = {f: f in args for f in ("--dac", "--dac-bass", "--voice", "--degrees", "--fx")}
+    fxs = [w for w in musicgen.FX_WORDS if "--" + w in args]
+    args = [a for a in args if a not in flags and not (a.startswith("--") and a[2:] in musicgen.FX_WORDS)]
     if len(args) != 1 or args[0] not in musicgen.KINDS or (mood or "") not in musicgen.MOODS:
-        print("generate KIND [--seed N] [--mood M] [--tempo BPM] [--dac] [--dac-bass] [--voice] [-o FILE] [--samples DIR] "
+        print("generate KIND [--seed N] [--mood M] [--tempo BPM] [--dac] [--dac-bass] [--voice]\n  [--echo] [--reverb] [--filter] [--vibrato] [--slide] [--sweep] [--fx] [--degrees] [-o FILE] [--samples DIR] "
               "[--wav FILE]\n  kinds: %s\n  moods: %s" % (", ".join(musicgen.KINDS), ", ".join(m for m in musicgen.MOODS if m)),
               file=sys.stderr)
         return 2
@@ -80,7 +94,8 @@ def generate_cmd(args):
         print("error: --seed and --tempo are numbers", file=sys.stderr)
         return 2
     text = musicgen.generate(args[0], seed, mood or "", tempo, dac=flags["--dac"], dac_bass=flags["--dac-bass"],
-                             voice=flags["--voice"])
+                             voice=flags["--voice"], fx=musicgen.FX_WORDS if flags["--fx"] else fxs,
+                             degrees=flags["--degrees"])
     if out:
         Path(out).write_text(text, encoding="utf-8", newline="\n")
         print("wrote", out)
@@ -171,13 +186,20 @@ def import_cmd(args):
     p.add_argument("--voices", type=int, metavar="N",
                    help="(MIDI) make songs of N voices: the most important parts stay and the others' notes fill their gaps "
                         "(default: a voice for every part, up to 16)")
+    p.add_argument("--drum-lanes", metavar="auto|N", default="auto",
+                   help="(MIDI) DAC lanes for the percussion: auto (default) uses as many as the file's simultaneous hits need, "
+                        "up to 8; a number 2-8 allows at most that many and hits that do not fit are reported")
     p.add_argument("--song", metavar="NAME", help="(FamiStudio) import only this song, by name or number; (GoatTracker) only this "
                                                   "subtune, by number (default: every song)")
     p.add_argument("--region", choices=("ntsc", "pal"), help="(FamiStudio) the timing to use (default: what the file says); "
-                                                             "(GoatTracker) 50 Hz pal or 60 Hz ntsc (default pal: the file does not say)")
+                                                             "(GoatTracker, SID-Wizard) 50 Hz pal or 60 Hz ntsc (default pal: the file does not say); "
+                                                             "(SID Factory II) overrides the PAL / NTSC the file records")
     p.add_argument("--multispeed", type=int, choices=(1, 2, 4), default=1,
                    help="(GoatTracker) frames the player runs for each video frame (default 1: the file does not say)")
-    p.add_argument("--report", metavar="FILE", help="(FamiStudio, GoatTracker) also write what was changed or left out, as JSON")
+    p.add_argument("--report", metavar="FILE", help="(FamiStudio, GoatTracker, SID Factory II, SID-Wizard) also write what was changed or left out, as JSON")
+    wavg = p.add_argument_group("WAV samples", "a .wav file is added to the package as a DAC sample (named by --id, else by "
+                                               "the file name); these options apply to .wav files only")
+    dpcm.add_import_arguments(wavg, fit_default=True)
     add_library_options(p)
     a = p.parse_args(args)
     if a.id and len(a.files) != 1:
@@ -193,18 +215,38 @@ def import_cmd(args):
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, shared=True)
             print("added the shared parts of", f)
             continue
-        if Path(f).suffix.lower() == ".txt":
+        if Path(f).suffix.lower() == ".wav":
+            import_wav(a, pkg, f)
+            continue
+        if Path(f).suffix.lower() in (".txt", ".fms") or famistudio_binary.looks_like(_head(f)):
             import_famistudio(a, pkg, f, lib)
             continue
         if Path(f).suffix.lower() == ".sng" or goattracker.looks_like(_head(f)):
             import_goattracker(a, pkg, f, lib)
+            continue
+        if Path(f).suffix.lower() == ".sf2" or sf2.looks_like(_head(f)):
+            import_sf2(a, pkg, f, lib)
+            continue
+        if Path(f).suffix.lower() == ".swm" or sidwizard.looks_like(_head(f)):
+            import_sidwizard(a, pkg, f, lib)
             continue
         sid = a.id or pk.Package.safe_id(Path(f).stem)
         if sid in pkg.songs and a.no_replace:
             raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
         verb = "replaced" if sid in pkg.songs else "added"
         if is_midi:
-            pkg.add_song(sid, midi.from_midi(Path(f).read_bytes(), voices=a.voices), lib)
+            info = []
+            try:
+                msong = midi.from_midi(Path(f).read_bytes(), voices=a.voices, drum_lanes=a.drum_lanes, info=info)
+            except ValueError as e:
+                if isinstance(e, midi.MidiError):
+                    raise
+                raise pk.PackageError("--drum-lanes: %s" % e)
+            for w in msong.warnings:
+                print("warning:", w)
+            for line in info:
+                print(line)
+            pkg.add_song(sid, msong, lib)
         else:
             comp.import_mml(pkg, Path(f).read_text(encoding="utf-8"), lib, song_id=sid)
         print("%s song '%s' from %s" % (verb, sid, f))
@@ -213,10 +255,30 @@ def import_cmd(args):
     return 0
 
 
+def import_wav(a, pkg, f):
+    """Add a WAV file to the package as a DAC sample (the options are dpcm.ImportOptions; the defaults are the
+    composer's: rate 12, mixed to mono, normalized, level fitted) and print the report."""
+    name = a.id or dpcm.sample_name(f)
+    if name in pkg.samples and a.no_replace:
+        raise pk.PackageError("the package already has a sample '%s' (leave out --no-replace to replace it)" % name)
+    verb = "replaced" if name in pkg.samples else "added"
+    try:
+        opts = dpcm.options_from_args(a)
+        rate, x = dpcm.read_wav(f)
+        stats = {}
+        smp, notes = dpcm.convert_wav(x, rate, opts, name, stats)
+    except dpcm.DpcmError as e:
+        raise pk.PackageError("%s: %s" % (f, e))
+    pkg.samples[name] = smp
+    print("%s sample '%s' from %s" % (verb, name, f))
+    for line in dpcm.report_lines(smp, rate, len(x) / rate, stats, notes):
+        print("  " + line)
+
+
 def _head(f):
-    """The first bytes of a file (to tell a GoatTracker song from MML by its start)."""
+    """The first bytes of a file (to tell a GoatTracker, SID Factory II or SID-Wizard song from MML by its start)."""
     with open(f, "rb") as fh:
-        return fh.read(4)
+        return fh.read(32)
 
 
 def import_goattracker(a, pkg, f, lib):
@@ -251,12 +313,115 @@ def import_goattracker(a, pkg, f, lib):
         Path(a.report).write_text(json.dumps(res.report.as_dict(), indent=2), encoding="utf-8")
 
 
+def import_sf2(a, pkg, f, lib):
+    data = Path(f).read_bytes()
+    if not sf2.looks_like(data):
+        raise pk.PackageError("%s is not an SID Factory II song (the word 0x1337 should follow the load address)" % f)
+    sub = None
+    if a.song is not None:
+        try:
+            sub = int(a.song)
+        except ValueError:
+            raise pk.PackageError("--song for an SID Factory II file is the song number (got %r)" % a.song)
+    try:
+        res = sf2.load(data, region=a.region, song=sub)
+    except sf2.Sf2Error as e:
+        raise pk.PackageError("%s: %s" % (f, e))
+    if a.id and len(res.songs) != 1:
+        raise pk.PackageError("--id needs one song: the file has %d songs (pick one with --song N)" % len(res.songs))
+    stem = pk.Package.safe_id(Path(f).stem)
+    for n, imp in enumerate(res.songs, 1):
+        number = sub or n
+        sid = a.id or (stem if len(res.songs) == 1 else "%s_%d" % (stem, number))
+        if sid in pkg.songs and a.no_replace:
+            raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
+        verb = "replaced" if sid in pkg.songs else "added"
+        pkg.add_song(sid, imp.song, lib)
+        print("%s song '%s' from %s (%s)" % (verb, sid, f, imp.name))
+    for line in res.report.lines():
+        print("  " + line)
+    if a.report:
+        import json
+        Path(a.report).write_text(json.dumps(res.report.as_dict(), indent=2), encoding="utf-8")
+
+
+def import_sidwizard(a, pkg, f, lib):
+    data = Path(f).read_bytes()
+    if not sidwizard.looks_like(data):
+        raise pk.PackageError("%s is not a SID-Wizard song (it should hold SWM1 at its start)" % f)
+    sub = None
+    if a.song is not None:
+        try:
+            sub = int(a.song)
+        except ValueError:
+            raise pk.PackageError("--song for a SID-Wizard file is the subtune number (got %r)" % a.song)
+    stem = pk.Package.safe_id(Path(f).stem)
+    try:
+        res = sidwizard.load(data, region=a.region or "pal", subtune=sub, name=Path(f).stem)
+    except sidwizard.SidWizardError as e:
+        raise pk.PackageError("%s: %s" % (f, e))
+    if a.id and len(res.songs) != 1:
+        raise pk.PackageError("--id needs one song: the file has %d subtunes (pick one with --song N)" % len(res.songs))
+    for n, imp in enumerate(res.songs, 1):
+        number = sub or n
+        sid = a.id or (stem if len(res.songs) == 1 else "%s_%d" % (stem, number))
+        if sid in pkg.songs and a.no_replace:
+            raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
+        verb = "replaced" if sid in pkg.songs else "added"
+        pkg.add_song(sid, imp.song, lib)
+        print("%s song '%s' from %s (%s)" % (verb, sid, f, imp.name))
+    for line in res.report.lines():
+        print("  " + line)
+    if a.report:
+        import json
+        Path(a.report).write_text(json.dumps(res.report.as_dict(), indent=2), encoding="utf-8")
+
+
+def import_sidwizard(a, pkg, f, lib):
+    data = Path(f).read_bytes()
+    if not sidwizard.looks_like(data):
+        raise pk.PackageError("%s is not a SID-Wizard song (it should hold SWM1 at its start)" % f)
+    sub = None
+    if a.song is not None:
+        try:
+            sub = int(a.song)
+        except ValueError:
+            raise pk.PackageError("--song for a SID-Wizard file is the subtune number (got %r)" % a.song)
+    stem = pk.Package.safe_id(Path(f).stem)
+    try:
+        res = sidwizard.load(data, region=a.region or "pal", subtune=sub, name=Path(f).stem)
+    except sidwizard.SidWizardError as e:
+        raise pk.PackageError("%s: %s" % (f, e))
+    if a.id and len(res.songs) != 1:
+        raise pk.PackageError("--id needs one song: the file has %d subtunes (pick one with --song N)" % len(res.songs))
+    for n, imp in enumerate(res.songs, 1):
+        number = sub or n
+        sid = a.id or (stem if len(res.songs) == 1 else "%s_%d" % (stem, number))
+        if sid in pkg.songs and a.no_replace:
+            raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
+        verb = "replaced" if sid in pkg.songs else "added"
+        pkg.add_song(sid, imp.song, lib)
+        print("%s song '%s' from %s (%s)" % (verb, sid, f, imp.name))
+    for line in res.report.lines():
+        print("  " + line)
+    if a.report:
+        import json
+        Path(a.report).write_text(json.dumps(res.report.as_dict(), indent=2), encoding="utf-8")
+
+
 def import_famistudio(a, pkg, f, lib):
     from .formats import famistudio_text as fam
-    text = Path(f).read_text(encoding="utf-8-sig")
-    if not fam.looks_like(text):
-        raise pk.PackageError("%s is not a FamiStudio text file (it should start with a Project line)" % f)
-    res = fam.load(text, song=a.song, region=a.region)
+    data = Path(f).read_bytes()
+    try:
+        if famistudio_binary.looks_like(data):                       # a .fms project, by its FMS! start
+            res = famistudio_binary.load(data, song=a.song, region=a.region)
+        else:
+            text = data.decode("utf-8-sig", errors="replace")
+            if not fam.looks_like(text):
+                raise pk.PackageError("%s is not a FamiStudio file (a .fms project starts with FMS!, a text export with a Project line)" % f)
+            res = fam.load(text, song=a.song, region=a.region)
+    except fam.FamiStudioError as e:
+        raise pk.PackageError("%s: %s" % (f, e))
     if a.id and len(res.songs) != 1:
         raise pk.PackageError("--id needs one song: the file has %d (pick one with --song)" % len(res.songs))
     stem = pk.Package.safe_id(Path(f).stem)
@@ -306,6 +471,7 @@ def export_cmd(args):
         if songs and a.midi:
             r = exporter.export_song(pkg, songs[0].name, a.o, fmt="mid", lib=lib)
             written = r.written
+            notes.extend(r.notes)
         elif a.o == "-":
             text = comp.song_to_mml(pkg, songs[0].name, notes)[0] if songs else comp.lib_to_mml(pkg, picked)[0]
             sys.stdout.write(text)
@@ -319,7 +485,9 @@ def export_cmd(args):
         d = Path(a.d)
         written = []
         for c in picked:
-            written.extend(exporter.export_song(pkg, c.name, d / (c.name + ".mid"), fmt="mid", lib=lib).written)
+            r = exporter.export_song(pkg, c.name, d / (c.name + ".mid"), fmt="mid", lib=lib)
+            written.extend(r.written)
+            notes.extend("%s: %s" % (c.name, n) for n in r.notes)
     else:
         written = comp.export_mml(pkg, picked, a.d, notes)
     for w in written:
@@ -330,7 +498,7 @@ def export_cmd(args):
 
 
 def export_song_cmd(args):
-    p = parser("export-song", "Export one song as wav, mid, mml, csp, famistudio or famitracker.  Options marked (wav) apply to a wav only.")
+    p = parser("export-song", "Export one song as wav, mid, mml, csp, famistudio, famitracker or goattracker.  Options marked (wav) apply to a wav only.")
     p.add_argument("source", metavar="SOURCE[:SONG]", help="a .csp or .mml; SOURCE:SONG picks a song of a package")
     p.add_argument("song", nargs="?", metavar="SONG", help="the song id (not needed when there is only one)")
     p.add_argument("-o", "--output", metavar="OUT", required=True, help="the file to write")
@@ -342,8 +510,16 @@ def export_song_cmd(args):
     p.add_argument("--end", metavar="T", help="(wav) where to stop (default: the end of the song and its tail)")
     p.add_argument("--loops", type=int, default=0, metavar="N", help="(wav) trips round the loop after the first pass")
     p.add_argument("--tail", type=float, default=2.0, metavar="S", help="(wav) seconds to let the last notes ring (default 2)")
-    p.add_argument("--region", choices=("ntsc", "pal"), default="ntsc", help="(famistudio, famitracker) the frame rate the file is timed for (default ntsc)")
-    p.add_argument("--fs-version", metavar="X.Y.Z", default="4.5.3", help="(famistudio) the FamiStudio version the file says it is from (default 4.5.3)")
+    p.add_argument("--region", choices=("ntsc", "pal"), help="(famistudio, famitracker, goattracker) the frame rate the file is timed for "
+                                                             "(default ntsc for famistudio, pal for goattracker: the importer's default)")
+    p.add_argument("--multispeed", type=int, choices=(1, 2, 4), default=1,
+                   help="(goattracker) player frames for each video frame (default 1; 2 or 4 make rows longer in frames, for fast songs)")
+    p.add_argument("--gt-tempo", choices=("exact", "speed"), default="exact",
+                   help="(goattracker) exact: change the speed on the rows that need it, so the timing is exact; "
+                        "speed: one whole number of frames a row, as a tracker song usually has, at the cost of the tempo")
+    p.add_argument("--fs-version", metavar="X.Y.Z", default=exporter.DEFAULT_FS_VERSION,
+                   help="(famistudio) the version the file says it is from, or 'none' to leave the Version out (default %s)" % exporter.DEFAULT_FS_VERSION)
+    p.add_argument("--fs-reference", metavar="FILE", help="(famistudio) a text file exported by your own FamiStudio: its exact Version is used")
     add_library_options(p)
     a = p.parse_args(glue(args, "--volume", "--peak"))
     src, song = exporter.split_source(a.source)
@@ -354,7 +530,7 @@ def export_song_cmd(args):
     opts = exporter.AudioOptions(volume=exporter.gain(a.volume), normalize=a.normalize, peak_db=exporter.decibels(a.peak),
                                  start=exporter.frames(a.start), end=exporter.frames(a.end) if a.end else None,
                                  loops=a.loops, tail=a.tail)
-    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib, a.region, a.fs_version)
+    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib, a.region, a.fs_version, a.fs_reference, a.multispeed, a.gt_tempo)
     for w in r.written:
         print("wrote", w, *(["(%.2fs, peak %s)" % (r.seconds, "silent" if r.peak_db is None else "%.1f dBFS" % r.peak_db)]
                             if r.format == "wav" and w == r.path else []))

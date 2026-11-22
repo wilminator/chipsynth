@@ -25,6 +25,9 @@ class Prefs:
     width: int = 1280
     height: int = 760
     last: str = ""
+    fs_stamp: str = "default"        # FamiStudio export's Version: "default", "reference", "typed" or "none"
+    fs_typed: str = ""               # the version typed in ("typed")
+    fs_ref: str = ""                 # the last reference file chosen ("reference"; only its folder is reused)
     panels: Panels = field(default_factory=Panels)
 
     @classmethod
@@ -48,6 +51,8 @@ class Prefs:
         out.ppb = max(6.0, min(400.0, float(out.ppb)))
         out.row = max(6.0, min(48.0, float(out.row)))
         out.track_h = max(56, min(400, int(out.track_h)))
+        if out.fs_stamp not in ("default", "reference", "typed", "none"):
+            out.fs_stamp = "default"
         if out.view not in ("stack", "roll", "tracker"):
             out.view = "stack"
         return out

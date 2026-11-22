@@ -7,18 +7,55 @@
     song = from_midi(data, voices=4)   # ... or only 4 voices: the most important parts, with the others' notes poured into their gaps
 
 Our time is 96 ticks to a quarter note, which is exactly the file's division on the way out.  Coming in, times are
-rounded to 1/32 notes (12 ticks) so every length can be written as MML.  Drums (channel 10) are left out, and a voice is one
-note at a time: where notes overlap the higher one wins and the lower is cut.
+rounded to 1/32 notes (12 ticks) so every length can be written as MML.  A voice is one note at a time: where notes
+overlap the higher one wins and the lower is cut.
+
+Drums (channel 10, the General MIDI percussion notes) go to the DAC lanes as the built-in kit samples (see `GM_DRUMS`):
+a hit's velocity is its volume, the lane follows the generator's rule (kick, snare and toms prefer D1, hats and crash D2,
+one hit at a time per lane, the stronger wins and the loser moves to the other lane when that is free).  General MIDI
+percussion is polyphonic, so a hit that fits on neither D1 nor D2 spills to D3, D4, ... (the lowest free lane) when the
+song may have more lanes: `from_midi(data, drum_lanes="auto")` uses as many as the file needs (up to 8, `dacs N` in the
+header; a file that never needs more than two comes out exactly as with two), `drum_lanes=N` (2-8) allows at most N.  Hits
+are placed on the 1/32 grid and two hits "sound at once" when they share a grid step.  A percussion note the kit has no
+sample for, or a hit that fits on no allowed lane, is reported in `song.warnings`, never dropped silently; the lanes used
+are described in the `info` list when one is passed.  `to_midi` writes the kit hits of every DAC lane D1-D8 back as
+channel 10 notes (`KIT_GM`), simultaneous ones as several note-ons at one tick.
 """
 import struct
 
-from .song import Song, Note, Rest, Octave, Tempo, SongError
+from .song import Song, Note, Rest, Octave, Tempo, Volume, Play, Tweak, SongError
+from .musicgen import DAC_SAMPLE, DAC_LOW, DAC_PRIORITY, DAC_PAN
+from .synth import MAX_DACS
 
 PPQ = 96
 MAX_VOICES = 16
 CHANNELS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15)     # channel 10 (index 9) is the drums: voices skip it
 GRID = 12
 LETTERS = (("c", 0), ("c", 1), ("d", 0), ("d", 1), ("e", 0), ("f", 0), ("f", 1), ("g", 0), ("g", 1), ("a", 0), ("a", 1), ("b", 0))
+
+
+# General MIDI percussion note -> kit drum (a key of musicgen.DAC_SAMPLE).  The rest of 27-87 has no kit sample.
+GM_DRUMS = {35: "kick", 36: "kick", 37: "snare", 38: "snare", 39: "snare", 40: "snare",
+            41: "tomlo", 43: "tomlo", 45: "tomlo", 47: "tom", 48: "tom", 50: "tom",
+            42: "hat", 44: "hat", 46: "ohat", 51: "hat", 53: "hat", 54: "hat", 59: "hat",
+            49: "crash", 52: "crash", 55: "crash", 57: "crash"}
+# kit sample name -> the note `to_midi` writes for it (each maps back to itself through GM_DRUMS)
+KIT_GM = {"kit_kick": 36, "kit_snare": 38, "kit_tomlo": 41, "kit_tom": 47, "kit_hat": 42, "kit_ohat": 46, "kit_crash": 49}
+GM_NAMES = {27: "High Q", 28: "Slap", 29: "Scratch Push", 30: "Scratch Pull", 31: "Sticks", 32: "Square Click",
+            33: "Metronome Click", 34: "Metronome Bell", 35: "Acoustic Bass Drum", 36: "Bass Drum 1", 37: "Side Stick",
+            38: "Acoustic Snare", 39: "Hand Clap", 40: "Electric Snare", 41: "Low Floor Tom", 42: "Closed Hi-Hat",
+            43: "High Floor Tom", 44: "Pedal Hi-Hat", 45: "Low Tom", 46: "Open Hi-Hat", 47: "Low-Mid Tom",
+            48: "Hi-Mid Tom", 49: "Crash Cymbal 1", 50: "High Tom", 51: "Ride Cymbal 1", 52: "Chinese Cymbal",
+            53: "Ride Bell", 54: "Tambourine", 55: "Splash Cymbal", 56: "Cowbell", 57: "Crash Cymbal 2",
+            58: "Vibraslap", 59: "Ride Cymbal 2", 60: "Hi Bongo", 61: "Low Bongo", 62: "Mute Hi Conga",
+            63: "Open Hi Conga", 64: "Low Conga", 65: "High Timbale", 66: "Low Timbale", 67: "High Agogo",
+            68: "Low Agogo", 69: "Cabasa", 70: "Maracas", 71: "Short Whistle", 72: "Long Whistle", 73: "Short Guiro",
+            74: "Long Guiro", 75: "Claves", 76: "Hi Wood Block", 77: "Low Wood Block", 78: "Mute Cuica",
+            79: "Open Cuica", 80: "Mute Triangle", 81: "Open Triangle", 82: "Shaker"}
+DRUM_CHANNEL = 9
+HIT_TICKS = 12                                       # how long a written drum note lasts (the note-off is not heard)
+LAST_HIT_TICKS = 96                                  # the final hit of a lane gets a quarter note of room
+LANE_PAN = {**DAC_PAN, **{k: (0 if k % 2 else 2) for k in range(3, MAX_DACS + 1)}}   # D3.. alternate the sides of D1 / D2
 
 
 class MidiError(ValueError):
@@ -69,8 +106,46 @@ def to_midi(tune):
             ev.append((int(n.start), 2, bytes([0x90 | ch, n.pitch, vel])))
             ev.append((int(n.start + n.dur), 1, bytes([0x80 | ch, n.pitch, 0])))
         tracks.append(_track(ev))
+    hits, _ = drum_hits(tune)
+    if hits:
+        ev = [(0, 0, b"\xff\x03" + bytes([len(b"drums")]) + b"drums")]
+        for tick, note, vel, length in hits:
+            ev.append((tick, 2, bytes([0x90 | DRUM_CHANNEL, note, vel])))
+            ev.append((tick + length, 1, bytes([0x80 | DRUM_CHANNEL, note, 0])))
+        tracks.append(_track(ev))
     head = struct.pack(">HHH", 1, len(tracks), PPQ)
     return _chunk(b"MThd", head) + b"".join(tracks)
+
+
+def drum_hits(tune):
+    """The plays of a Tune's DAC lanes (D1-D8) as MIDI drum notes: ([(tick, note, velocity, length)], [report lines]).  Only the
+    kit's drum samples have a General MIDI note (`KIT_GM`); a play of any other sample (your own, the kit's "hey" or its
+    pitched bass) is left out and the lines say how many.  Two lanes hitting the same note together make one hit."""
+    best, skipped = {}, {}
+    for events in getattr(tune, "dac", None) or []:
+        for tick, kind, smp, vv in events:
+            if kind != "play" or smp is None:
+                continue
+            note = KIT_GM.get(smp.name)
+            if note is None:
+                skipped[smp.name or "unnamed sample"] = skipped.get(smp.name or "unnamed sample", 0) + 1
+                continue
+            vol = vv[0] if vv else 15
+            vel = max(1, min(127, round(vol * 127 / 15))) if vol else 1
+            key = (int(tick), note)
+            best[key] = max(best.get(key, 0), vel)
+    by_note = {}
+    for (tick, note), vel in sorted(best.items()):
+        by_note.setdefault(note, []).append((tick, vel))
+    hits = []
+    for note, seq in by_note.items():
+        for i, (tick, vel) in enumerate(seq):
+            room = seq[i + 1][0] - tick if i + 1 < len(seq) else HIT_TICKS
+            hits.append((tick, note, vel, max(1, min(HIT_TICKS, room))))
+    hits.sort()
+    lines = ["the %s sample (%d hit%s on the DAC lanes) has no General MIDI drum note and was left out"
+             % (name, n, "" if n == 1 else "s") for name, n in sorted(skipped.items())]
+    return hits, lines
 
 
 # ------------------------------------------------------------------ reading
@@ -196,14 +271,19 @@ def _fold(kept, dropped, q):
     return placed, lost
 
 
-def from_midi(data, voices=None):
+def from_midi(data, voices=None, drum_lanes="auto", info=None):
     """MIDI bytes -> Song (raises MidiError if it cannot be read).  Every track / channel with notes becomes a voice, up
     to 16.  `voices=N` makes a song of exactly N voices (or fewer, if the file has fewer parts): the N most important
-    parts stay, and the notes of the others are placed in whatever gaps those leave."""
+    parts stay, and the notes of the others are placed in whatever gaps those leave.
+
+    `drum_lanes` is "auto" (as many DAC lanes as the drums need, 2 to 8) or a number 2-8 (at most that many); a hit that
+    fits on none is reported in `song.warnings`.  When `info` is a list, a line saying which lanes the drums used is
+    appended to it (only when there are drums)."""
+    cap = _lane_cap(drum_lanes)
     div, tracks = parse(data)
     scale = PPQ / div
     q = lambda t: int(round(t * scale / GRID)) * GRID
-    found, drums = [], 0
+    found, hits = [], []
     bpm, time, tempos = None, None, []
     for ev in tracks:
         open_, notes = {}, {}
@@ -216,17 +296,18 @@ def from_midi(data, voices=None):
                     tempos.append((q(tick), t))
             elif kind == "time" and time is None:
                 time = (a, b)
-            elif kind == "on" and ch != 9:
+            elif kind == "on" and ch != DRUM_CHANNEL:
                 open_[(ch, a)] = tick
-            elif kind == "off" and ch != 9 and (ch, a) in open_:
+            elif kind == "off" and ch != DRUM_CHANNEL and (ch, a) in open_:
                 notes.setdefault(ch, []).append((open_.pop((ch, a)), tick, a))
-            elif kind in ("on", "off") and ch == 9:
-                drums += 1
+            elif kind == "on":
+                hits.append((q(tick), a, b))
         for ch, ns in sorted(notes.items()):
             found.extend(_layers(sorted(ns), q))
     parts = [v for v in found if v]
-    if not parts:
-        raise MidiError("the file has no notes")
+    lanes, drum_warnings = _drum_lanes(hits, cap)
+    if not parts and not lanes:
+        raise MidiError("the file has no notes" + (" the drum kit can play" if hits else ""))
     want = min(len(parts), MAX_VOICES if voices is None else max(1, min(MAX_VOICES, int(voices))))
     order = rank_parts(parts)
     kept_ix = sorted(order[:want])                                   # the file's own order among the kept parts
@@ -242,14 +323,107 @@ def from_midi(data, voices=None):
         song.warnings.append("the file has %d parts with notes: the %d most important became voices and the other %d were folded in "
                              "(%d of their %d notes fit into gaps, %d were left out)"
                              % (len(parts), want, len(dropped), placed, total, lost))
-    if drums:
-        song.warnings.append("the drum part was left out")
-    song.voices = len(kept)
+    song.warnings.extend(drum_warnings)
+    song.voices = max(1, len(kept))
     song.tracks = {}
     song.__post_init__()
     for k, ns in enumerate(kept):
         song.tracks["V%d" % (k + 1)] = _voice_events(ns, q, tempos if k == 0 else [])
+    if lanes:
+        song.dacs = max(song.dacs, 2, max(lanes))
+        song.__post_init__()
+        for k, events in enumerate(_lane_events(lanes), start=1):
+            if events:
+                song.tracks["D%d" % k] = events
+        for name in sorted({e.sample for k in range(1, song.dacs + 1) for e in song.tracks.get("D%d" % k, []) if isinstance(e, Play)}):
+            song.samples[name] = (name, None)
+        if info is not None:
+            n = sum(len(v) for v in lanes.values())
+            info.append("drums: %d hit%s on %d lane%s (%s)%s" % (
+                n, "" if n == 1 else "s", len(lanes), "" if len(lanes) == 1 else "s",
+                ", ".join("D%d" % k for k in sorted(lanes)),
+                "; at most %d lanes allowed" % cap if str(drum_lanes).lower() != "auto" else ""))
     return song
+
+
+def has_drums(data):
+    """True when the file has a channel 10 note-on (what the composer asks the drum lanes for)."""
+    return any(kind == "on" and ch == DRUM_CHANNEL for ev in parse(data)[1] for _, kind, _, _, ch in ev)
+
+
+def _lane_cap(drum_lanes):
+    """"auto" -> 8, a number 2-8 (or its text) -> that; anything else raises ValueError."""
+    if drum_lanes is None or str(drum_lanes).strip().lower() == "auto":
+        return MAX_DACS
+    try:
+        n = int(str(drum_lanes).strip())
+    except ValueError:
+        n = 0
+    if not 2 <= n <= MAX_DACS:
+        raise ValueError("drum lanes must be auto or a number from 2 to %d" % MAX_DACS)
+    return n
+
+
+def _drum_lanes(hits, cap=2):
+    """[(tick, GM note, velocity)] -> ({1: {tick: (drum, volume)}, 2: {...}, 3: ...}, warnings); lanes with no hit are
+    left out.  The generator's lane rules: kick / snare / toms prefer D1, hats and crash D2; one hit per lane at a time
+    (a grid step), the one that ranks higher in DAC_PRIORITY wins, and the loser goes to the other lane when it is free
+    there, else to the lowest free lane from D3 up to `cap` lanes, else it is reported."""
+    unmapped, by_tick = {}, {}
+    for tick, note, vel in hits:
+        key = GM_DRUMS.get(note)
+        if key is None:
+            unmapped[note] = unmapped.get(note, 0) + 1
+            continue
+        cur = by_tick.setdefault(tick, {})
+        cur[key] = max(cur.get(key, 0), vel)
+    lanes, lost = {k: {} for k in range(1, cap + 1)}, {}
+    for tick, cur in sorted(by_tick.items()):
+        for key in sorted(cur, key=DAC_PRIORITY.index):
+            vol = max(1, min(15, round(cur[key] * 15 / 127)))
+            pref = 1 if key in DAC_LOW else 2
+            for lane in (pref, 3 - pref) + tuple(range(3, cap + 1)):
+                if tick not in lanes[lane]:
+                    lanes[lane][tick] = (key, vol)
+                    break
+            else:
+                lost[key] = lost.get(key, 0) + 1
+    warnings = []
+    if unmapped:
+        n = sum(unmapped.values())
+        warnings.append("the drum kit has no sample for %d hit%s, left out: %s"
+                        % (n, "" if n == 1 else "s",
+                           ", ".join("%s (note %d) x%d" % (GM_NAMES.get(k, "percussion"), k, c) for k, c in sorted(unmapped.items()))))
+    if lost:
+        n = sum(lost.values())
+        where = "the two drum lanes (D1, D2)" if cap == 2 else "the %d drum lanes (D1-D%d)" % (cap, cap)
+        warnings.append("%d drum hit%s did not fit on %s at the same moment and %s left out: %s"
+                        % (n, "" if n == 1 else "s", where, "was" if n == 1 else "were",
+                           ", ".join("%s x%d" % (k, c) for k, c in sorted(lost.items()))))
+    return {k: v for k, v in lanes.items() if v}, warnings
+
+
+def _lane_events(lanes):
+    """The lanes' hits -> [events for D1, D2, ... up to the highest lane used] the way the generator writes them: a pan, then each hit is
+    a volume (when it changes) and a Play lasting until the next hit."""
+    out = []
+    for k in range(1, max(2, max(lanes)) + 1):
+        hits = sorted(lanes.get(k, {}).items())
+        if not hits:
+            out.append([])
+            continue
+        ev, pos, vol = [Tweak("pan", str(LANE_PAN[k]))], 0, None
+        for i, (tick, (key, v)) in enumerate(hits):
+            if tick > pos:
+                ev.append(Rest(tick - pos))
+            if v != vol:
+                ev.append(Volume(value=v))
+                vol = v
+            length = hits[i + 1][0] - tick if i + 1 < len(hits) else LAST_HIT_TICKS
+            ev.append(Play(DAC_SAMPLE[key], length))
+            pos = tick + length
+        out.append(ev)
+    return out
 
 
 
