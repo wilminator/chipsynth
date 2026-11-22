@@ -1391,6 +1391,102 @@ class NoteVolumeEffectKeyTests(unittest.TestCase):
         a.frame([key(pygame.K_COMMA)])                             # no note here: refused, nothing changes
         self.assertIn("No note", a.message)
 
+    # ---- 1b. typed volume, the voice default, the MML round trip
+    def test_model_type_volume_and_voice_default(self):
+        from chipsynth.composer import tracker as TR
+        self.assertEqual(TR.type_volume("", 7), ("7", True))
+        self.assertEqual(TR.type_volume("", 0), ("0", True))
+        self.assertEqual(TR.type_volume("", 1), ("1", False))          # waits: could be 10-15
+        self.assertEqual(TR.type_volume("1", 5), ("15", True))
+        self.assertEqual(TR.type_volume("1", 6), ("1", False))         # 16 does not exist: ignored
+        self.assertEqual(TR.entry_volume(""), None)
+        self.assertEqual(TR.entry_volume("12"), 12)
+        a = self.app
+        self.assertEqual(TR.voice_default(a.roll, 0), 10)              # every note is v10
+        a.ed.set_volume(0, 1, 4)
+        a.sync()
+        self.assertEqual(TR.voice_default(a.roll, 0), 10)              # the odd one out does not become the default
+        self.assertEqual(TR.voice_default(a.roll, 1), 15)              # V2 never set a volume
+        self.assertEqual(TR.voice_default(a.roll, 4), 15)              # a drum column
+        a.ed.set_volume(0, 0, 8)
+        a.ed.set_volume(0, 2, 6)
+        a.sync()
+        self.assertEqual(TR.voice_default(a.roll, 0), 8)               # all different (8 4 6 10): the first note's volume
+
+    def test_typing_a_volume_in_the_tracker(self):
+        a = self.app
+        self.tracker()
+        a.tr.row, a.tr.col = 1, 0
+        a.frame([key(pygame.K_SLASH)])
+        self.assertEqual(a.tr.vol_entry, "")
+        a.frame([key(pygame.K_5)])                                      # one digit is enough for 0, 2-9
+        self.assertIsNone(a.tr.vol_entry)
+        self.assertEqual(self.vols(), [10, 5, 10, 10])
+        a.frame([key(pygame.K_SLASH), key(pygame.K_1), key(pygame.K_2)])
+        self.assertEqual(self.vols(), [10, 12, 10, 10])
+        a.frame([key(pygame.K_SLASH), key(pygame.K_1), key(pygame.K_RETURN)])   # 1 then Enter is volume 1
+        self.assertEqual(self.vols(), [10, 1, 10, 10])
+        a.frame([key(pygame.K_SLASH), key(pygame.K_0)])
+        self.assertEqual(self.vols(), [10, 0, 10, 10])
+        a.frame([key(pygame.K_SLASH), key(pygame.K_KP9)])               # keypad digits work too
+        self.assertEqual(self.vols()[1], 9)
+        a.frame()                                                       # draws, with the entry shown
+        a.frame([key(pygame.K_SLASH), key(pygame.K_1)])
+        a.frame()
+        self.assertEqual(a.tr.vol_entry, "1")
+        a.frame([key(pygame.K_ESCAPE)])                                 # Esc gives up and changes nothing
+        self.assertIsNone(a.tr.vol_entry)
+        self.assertEqual(self.vols()[1], 9)
+        a.frame([key(pygame.K_SLASH), key(pygame.K_1), key(pygame.K_DOWN)])    # any other key cancels
+        self.assertIsNone(a.tr.vol_entry)
+        self.assertEqual(self.vols()[1], 9)
+        a.frame([key(pygame.K_SLASH), key(pygame.K_1), key(pygame.K_5)])   # 15 is done at once
+        self.assertEqual(self.vols()[1], 15)
+        a.frame([key(pygame.K_SLASH), key(pygame.K_1), key(pygame.K_BACKSPACE), key(pygame.K_3)])   # edit before it lands
+        self.assertEqual(self.vols()[1], 3)
+        a.tr.row = 10
+        a.frame([key(pygame.K_SLASH)])                                  # no note here: typing does not start
+        self.assertIsNone(a.tr.vol_entry)
+        self.assertIn("No note", a.message)
+        a.tr.row = 2
+        a.frame([key(pygame.K_SLASH)])
+        a.frame([key(pygame.K_TAB)])                                    # leaving the tracker drops the entry
+        self.assertIsNone(a.tr.vol_entry)
+
+    def test_each_typed_volume_is_one_undo_step_and_survives_mml(self):
+        a = self.app
+        self.tracker()
+        a.tr.row, a.tr.col = 1, 0
+        a.frame([key(pygame.K_SLASH), key(pygame.K_1), key(pygame.K_3)])
+        a.tr.row = 3
+        a.frame([key(pygame.K_SLASH), key(pygame.K_2)])
+        self.assertEqual(self.vols(), [10, 13, 10, 2])
+        again = Song.from_mml(a.ed.song.to_mml()).compile()             # MML out, MML in
+        self.assertEqual([n.vol for n in again.voices[0]], [10, 13, 10, 2])
+        self.assertEqual([n.start for n in again.voices[0]], [n.start for n in a.ed.tune.voices[0]])
+        a.frame([key(pygame.K_z, pygame.KMOD_CTRL)])
+        self.assertEqual(self.vols(), [10, 13, 10, 10])                 # one step each
+        a.frame([key(pygame.K_z, pygame.KMOD_CTRL)])
+        self.assertEqual(self.vols(), [10, 10, 10, 10])
+        a.frame([key(pygame.K_y, pygame.KMOD_CTRL)])
+        self.assertEqual(self.vols(), [10, 13, 10, 10])
+
+    def test_volume_through_a_pattern_and_back_through_mml(self):
+        a = self.app
+        a.load_song(Song.from_mml("tempo 120\n[pat]\nriff = c4 d4 e4\nV1: o4 v12 !riff !riff f4\n"), "P")
+        self.assertEqual(self.vols(), [12] * 7)
+        a.ed.set_volume(0, 1, 5)                                        # d of the first call: every call changes (a pattern)
+        want = [12, 5, 12, 12, 5, 12, 12]
+        self.assertEqual(self.vols(), want)                             # and the f after them keeps its volume
+        mml = a.ed.song.to_mml()
+        self.assertEqual([n.vol for n in Song.from_mml(mml).compile().voices[0]], want)
+        self.assertEqual(Song.from_mml(mml).to_mml(), mml)              # and the text is stable
+        a.ed.set_volume(0, 6, 3)                                        # the note after the pattern: only it changes
+        self.assertEqual(self.vols(), want[:6] + [3])
+        a.ed.undo()
+        a.ed.undo()
+        self.assertEqual(self.vols(), [12] * 7)
+
     # ---- 2. effects
     def test_editor_effects(self):
         from chipsynth.songedit import effect_of

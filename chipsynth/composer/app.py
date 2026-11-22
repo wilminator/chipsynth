@@ -56,6 +56,9 @@ class NullOut:
         return self.player
 
 
+TR_DIGITS = {**{getattr(pygame, "K_%d" % d): d for d in range(10)}, **{getattr(pygame, "K_KP%d" % d): d for d in range(10)}}
+
+
 class Composer(FileMenu):
     def __init__(self, screen, prefs=None, packages=None, lib=None, out=None, prefs_path=None, root=None):
         self.screen = screen
@@ -728,7 +731,9 @@ class Composer(FileMenu):
                 self.prompt["text"] += e.unicode
             return
         if k == pygame.K_ESCAPE:
-            if self.overlay:
+            if self.tr.vol_entry is not None:
+                self.tr.vol_entry = None
+            elif self.overlay:
                 self.overlay = None
             else:
                 self.note_sel = self.hit_sel = None
@@ -1005,6 +1010,7 @@ class Composer(FileMenu):
         self.prefs.view = mode
         self.dirty = True
         self.drag = None
+        self.tr.vol_entry = None
         self.relayout()
         if mode == "tracker":
             self.tr.col = min(self.sel_voice, self.roll.lanes - 1)
@@ -1032,6 +1038,7 @@ class Composer(FileMenu):
         c.left = max(0, min(c.left, max(0, (self.roll.lanes if self.roll else 1) - g["cols"])))
 
     def tracker_down(self, pos):
+        self.tr.vol_entry = None
         g = panels.tracker_geo(self)
         x, y = pos
         if g["hbar"] and L.contains(g["hbar"], x, y):
@@ -1080,6 +1087,8 @@ class Composer(FileMenu):
         n = TR.total_rows(self.roll, rt)
         page = max(1, self.roll.bar_ticks // rt)
         moved = True
+        if c.vol_entry is not None:
+            return self.tracker_volume_key(e)
         if k == pygame.K_UP and mods & pygame.KMOD_SHIFT:
             c.octave = min(8, c.octave + 1)
             self.say("Octave %d" % c.octave, 1.5)
@@ -1117,6 +1126,11 @@ class Composer(FileMenu):
         elif k in (pygame.K_COMMA, pygame.K_PERIOD) and not mods & pygame.KMOD_CTRL:
             self.tracker_volume((1 if k == pygame.K_PERIOD else -1) * (4 if mods & pygame.KMOD_SHIFT else 1))
             return True
+        elif k == pygame.K_SLASH and not mods & (pygame.KMOD_CTRL | pygame.KMOD_SHIFT):
+            if self.tracker_note() is not None:
+                c.vol_entry = ""
+                self.say("Volume: type 0-9 (or 1 then 0-5 for 10-15), Enter sets, Esc cancels.", 4.0)
+            return True
         elif k == pygame.K_SEMICOLON:
             self.tracker_effect(-1 if mods & pygame.KMOD_SHIFT else 1)
             return True
@@ -1150,6 +1164,38 @@ class Composer(FileMenu):
             self.say("No note here.", 1.5)
             return None
         return c.col, self.roll.notes[c.col][i].start
+
+    def tracker_volume_key(self, e):
+        """A key while a volume is being typed (after `/`): digits, Enter, Backspace; anything else cancels."""
+        c, k = self.tr, e.key
+        digit = TR_DIGITS.get(k)
+        if digit is not None:
+            c.vol_entry, done = TR.type_volume(c.vol_entry, digit)
+            if done:
+                self.tracker_set_volume(TR.entry_volume(c.vol_entry))
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            vol = TR.entry_volume(c.vol_entry)
+            if vol is None:
+                c.vol_entry = None
+            else:
+                self.tracker_set_volume(vol)
+        elif k == pygame.K_BACKSPACE:
+            c.vol_entry = c.vol_entry[:-1]
+        else:
+            c.vol_entry = None                      # any other key: give up, and swallow it
+        return True
+
+    def tracker_set_volume(self, vol):
+        """Finish a typed volume: give the note at the cursor that volume (one undo step) and leave typing mode."""
+        self.tr.vol_entry = None
+        at = self.tracker_note()
+        if at is None:
+            return
+        v, start = at
+        if self.tune.voices[v][self.ed.find(v, start)].vol == vol:
+            return
+        if self.edit(lambda: self.ed.set_volume(v, self.ed.find(v, start), vol), None):
+            self.say("Volume %d" % vol, 1.5)
 
     def tracker_volume(self, delta):
         at = self.tracker_note()
