@@ -70,6 +70,15 @@ class DegreeTests(unittest.TestCase):
             mml.parse("tempo 120\nV1: key c major c4")
         self.assertIn("key off", str(cm.exception))
 
+    def test_command_words_that_start_with_a_note_letter_still_work_in_key_mode(self):
+        """filter, fsweep, fx, arp, adsr begin with a-g: they are words, not letter notes, while a key is on."""
+        t = mml.parse("tempo 120\n[fx]\nwah = vib=5,3\nV1: key c major filter lp,8,2 fsweep 3,9,1 fx wah arp 0,4 adsr 0,8,10,4 1 3")
+        self.assertEqual([n.pitch for n in t.voices[0]], [48, 52])
+        n = t.voices[0][0].inst
+        self.assertEqual((n.filt, n.fs_rate, n.vib_rate, n.arp, n.a, n.d), ("lp", 1, 5, (0, 4), 0, 8))
+        with self.assertRaises(mml.MMLError):                       # a letter note is still an error
+            mml.parse("tempo 120\nV1: key c major filter lp,8 c4")
+
     def test_out_of_range_degree_names_the_octave(self):
         with self.assertRaises(mml.MMLError):
             mml.parse("tempo 120\nV1: o8 key c major 8")
