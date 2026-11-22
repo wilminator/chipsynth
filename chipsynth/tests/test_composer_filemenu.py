@@ -419,7 +419,7 @@ class ImportTests(Base):
         self.assertNotEqual(a.overlay, "fileopts")               # one song: no dialog
         self.assertEqual(a.source, "")
         self.assertTrue(any("kick" in n.lower() for n in a.ed.sample_names()), a.ed.sample_names())
-        self.assertTrue(significant(a.last_report[1]))
+        self.assertTrue(any("expansion audio (VRC6)" in x for x in a.last_report[1]), a.last_report[1])    # carried to V5 and up now
         self.assertTrue(any("format version 19" in x for x in a.last_report[1]))
 
     def test_famistudio_project_with_two_songs_asks_which(self):

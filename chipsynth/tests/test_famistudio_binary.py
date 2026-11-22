@@ -453,13 +453,18 @@ class ImportTests(unittest.TestCase):
 
     def test_the_project_is_the_same_music_as_its_text_export(self):
         text = fam.load(TINY)
-        self.assertEqual(result_core(self.res), result_core(text))
+        core, want = result_core(self.res), result_core(text)
+        extra = {k for k in core["tracks"] if k not in want["tracks"]}        # the VRC6 channel the project switches on: V5 and up
+        self.assertEqual(extra, {"V5"})
+        core["tracks"] = {k: v for k, v in core["tracks"].items() if k not in extra}
+        core["instruments"] = {k: v for k, v in core["instruments"].items() if k in want["instruments"]}
+        self.assertEqual(core, want)
 
     def test_the_report_names_the_format_version_and_what_was_left_out(self):
         text = "\n".join(self.res.report.lines())
         self.assertIn("FamiStudio project file, format version 19 (FamiStudio 4.5)", text)
-        self.assertIn("VRC6Saw", text)
         self.assertIn("expansion audio (VRC6)", text)
+        self.assertIn("carried to voices V5 and up", text)
 
     def test_the_same_losses_as_the_text_importer_is_reported(self):
         text = fam.load(TINY).report
@@ -669,7 +674,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("added song 'tiny'", out)
         self.assertIn("format version 19", out)
         self.assertEqual(list(pk.load(self.tmp / "p.csp").songs), ["tiny"])
-        self.assertIn("VRC6Saw", "\n".join(json.loads((self.tmp / "r.json").read_text())["dropped"]))
+        self.assertIn("expansion audio (VRC6)", "\n".join(json.loads((self.tmp / "r.json").read_text())["notes"]))
 
     def test_import_by_the_magic_when_the_name_says_nothing(self):
         f = self.tmp / "project.dat"
