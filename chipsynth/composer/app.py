@@ -492,10 +492,8 @@ class Composer(FileMenu):
         elif t == pygame.KEYDOWN:
             self.on_key(e)
         elif t == getattr(pygame, "DROPFILE", -1):
-            if str(e.file).lower().endswith(".wav"):
-                self.import_wav(e.file)
-            elif str(e.file).lower().endswith((".sng", ".txt")):
-                self.import_begin(e.file)                  # GoatTracker / FamiStudio: asks for the options it needs
+            if str(e.file).lower().endswith((".wav", ".sng", ".txt")):
+                self.import_begin(e.file)                  # WAV / GoatTracker / FamiStudio: asks for the options it needs
             else:
                 self.open_path(e.file)
 
@@ -1681,15 +1679,20 @@ class Composer(FileMenu):
         self.stop()
         self.out.start(tune, loop=False)
 
-    def import_wav(self, path, name=None, rate=12):
-        """Convert a WAV file to a drum sample and make it available as `name` (default: the file name)."""
+    def import_wav(self, path, name=None, rate=12, options=None):
+        """Convert a WAV file to a drum sample and make it available as `name` (default: the file name).
+        `options` is a dpcm.ImportOptions (the File > Import dialog builds one); without it the import is what it always
+        was: rate `rate` (12), channels mixed, normalized, level fitted.  Says what it made (rate, length, bytes,
+        clipping) in the status line and the Last report."""
         if self.ed is None:
             return False
         path = Path(path)
+        opts = options or dpcm.ImportOptions(rate=rate, fit=True)
+        stats = {}
         try:
             sr, x = dpcm.read_wav(path)
-            name = name or re.sub(r"[^A-Za-z_]", "_", path.stem) or "sample"
-            smp = dpcm.convert(x, sr, rate=rate, name=name, fit=True)
+            name = name or dpcm.sample_name(path)
+            smp, notes = dpcm.convert_wav(x, sr, opts, name, stats)
         except dpcm.DpcmError as e:
             self.say("Can't import %s: %s" % (path.name, e), 8.0)
             return False
@@ -1702,10 +1705,15 @@ class Composer(FileMenu):
         self.imported[name] = smp
         self.sample_name = name
         self.sel_voice = self.roll.nv if self.sel_voice < self.roll.nv and self.roll.nd else self.sel_voice
-        self.say("Imported %s: %.2f s, %d bytes. Click a drum lane to place it." % (name, smp.seconds, smp.size), 6.0)
+        summary = "Imported %s: %.2f s, %d bytes. Click a drum lane to place it." % (name, smp.seconds, smp.size)
+        if stats.get("clipped"):
+            summary = "Imported %s: %.2f s, %d bytes, CLIPPING (%d samples). " % (name, smp.seconds, smp.size, stats["clipped"]) \
+                      + "Lower the gain."
+        self.show_report("Import %s" % path.name, dpcm.report_lines(smp, sr, len(x) / sr, stats, notes), summary)
         return True
 
     def import_dialog(self):
+        path = ""
         try:
             import tkinter
             from tkinter import filedialog
@@ -1713,10 +1721,10 @@ class Composer(FileMenu):
             root.withdraw()
             path = filedialog.askopenfilename(title="Import a sample", filetypes=[("WAV files", "*.wav"), ("All files", "*.*")])
             root.destroy()
-            if path:
-                self.import_wav(path)
         except Exception:
             self.say("No file dialog here: drag a .wav file onto the window.")
+        if path:
+            self.import_begin(path, "wav")
 
     # ------------------------------------------------------------ saving
     def request_quit(self):
