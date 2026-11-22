@@ -255,6 +255,20 @@ written by FamiStudio `--fs-version`, because FamiStudio only reads files whose 
 beyond D1, echo, reverb, the filter, vibrato, slide, pan, pulse-width sweeps and tempo changes. **Not verified:** the files have been read back by chipsynth's own importer only,
 not opened in a real FamiStudio (a test set of generated songs, NTSC and PAL, was made for the author to check by eye and ear).
 
+**FamiTracker text export: built** (branch `famitracker-export`). `chipsynth/formats/famitracker_export.py`; `python -m chipsynth export-song SOURCE[:SONG] -o OUT.ftm.txt` (or `-f famitracker`; a
+plain `.txt` stays FamiStudio's) `[--region ntsc|pal]`, and the composer's File > Export > FamiTracker text. Why: FamiStudio's own text only loads in the release that wrote it, and FamiTracker's
+`# FamiTracker text export 0.4.2` (read by FamiTracker and by FamiStudio's File > Import > FamiTracker Text, which accepts exactly that version) has been stable. Written from the format, with FamiStudio's
+reader (`FamitrackerTextFile.cs`, `FamitrackerBaseFile.cs`, MIT) read to be sure every line is one it accepts. V1, V2 -> Pulse 1, 2; V3 -> Triangle; V4 -> Noise; D1 -> DPCM (`DPCMDEF` / `DPCM`, `KEYDPCM`).
+`INST2A03` instruments with `MACRO` sequences: volume (the ADSR sampled once a frame, looping on its sustain), duty (the pulse width snapped to the NES's four, a pulse-width sweep sampled a frame at a time,
+the noise mode), arpeggio (semitone offsets a frame at a time, looping); instruments that sound alike are one. Note volume is written on every note. Timing: a row is a whole number of ticks; `speed` and `tempo`
+are chosen so FamiTracker's tempo counter lands the row length (150 / tempo frames a tick on NTSC, 125 / tempo on PAL) within a tenth of a percent where the range allows, preferring a tempo near the default;
+patterns are whole bars (16-64 rows where possible, so the loop point lands on a pattern's first row), identical patterns are shared, and the loop is `Bxx` on the song's last row (`C00` for a `once` song).
+Left out, and said in the Report: voices past V4, DACs past D1, echo, reverb, detune, the filter, vibrato, slide, pan, tempo changes, the release tail (notes are cut where they end), the volume envelope on the triangle
+(no volume on the NES), the arpeggio on noise; over the limits (128 patterns, 64 instruments, 36 samples) the end or the extras go. The check is a reader of our own in `tests/test_famitracker_export.py`
+that is as strict as FamiStudio's about where things sit on a line, plays the file with FamiStudio's copy of the tempo counter, and compares every note's frame and pitch.
+**Not verified:** the files were not opened in FamiTracker or FamiStudio (neither can run here); `KEYDPCM`'s trailing fields, the sense of a macro's release field (none is written) and the noise note letters were taken
+from FamiStudio's writer and reader, not from FamiTracker's own source.
+
 **Composer File menu: built** (PR #21). `chipsynth/composer/filemenu.py`: New (blank or from the generator), Open, Save, Save As, Import (MML, MIDI, FamiStudio text, GoatTracker) and
 Export (WAV, MIDI, MML, FamiStudio text, package copy), the same writers and importers as the command line, with a "Last report..." entry and the unsaved-edits dialog
 (Save, Don't save, Cancel) before anything replaces the open song.

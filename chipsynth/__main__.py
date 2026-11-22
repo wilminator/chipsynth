@@ -26,8 +26,12 @@
                                     -d DIR   where to write (default .)   -o FILE   write one thing to FILE ('-' = stdout)
                                     --type T --name GLOB   which components   --midi   songs as .mid instead
   export-song SOURCE[:SONG] [SONG] -o OUT [options]      (also: render)
-                                  one song as wav, mid, mml, csp or famistudio (a .txt FamiStudio can import:
-                                  V1-V4 and D1 only; --region ntsc|pal, --fs-version X.Y.Z; what it left out is printed) (from OUT's ending, or --format)
+                                  one song as wav, mid, mml, csp, famistudio or famitracker (from OUT's ending, or --format).
+                                  famistudio: a .txt FamiStudio imports; famitracker: FamiTracker's text export, read by
+                                  FamiTracker and by FamiStudio (File > Import > FamiTracker Text) in any version; end the
+                                  name in .ftm.txt or say -f famitracker (a plain .txt means famistudio).
+                                  Both: V1-V4 and D1 only, --region ntsc|pal (--fs-version X.Y.Z is famistudio's);
+                                  what the file left out is printed
                                     wav only: --volume V (0.5, 50%, -6dB)  --normalize [--peak DB, default -1]
                                               --start T  --end T   (1.5 | 250ms | 1:05.5 | 88200f = frames)
                                               --loops N  (trips round the loop)  --tail SECONDS  (default 2)
@@ -326,11 +330,11 @@ def export_cmd(args):
 
 
 def export_song_cmd(args):
-    p = parser("export-song", "Export one song as wav, mid, mml or csp.  Options marked (wav) apply to a wav only.")
+    p = parser("export-song", "Export one song as wav, mid, mml, csp, famistudio or famitracker.  Options marked (wav) apply to a wav only.")
     p.add_argument("source", metavar="SOURCE[:SONG]", help="a .csp or .mml; SOURCE:SONG picks a song of a package")
     p.add_argument("song", nargs="?", metavar="SONG", help="the song id (not needed when there is only one)")
     p.add_argument("-o", "--output", metavar="OUT", required=True, help="the file to write")
-    p.add_argument("-f", "--format", choices=exporter.FORMATS, help="default: from the ending of OUT")
+    p.add_argument("-f", "--format", choices=exporter.FORMATS, help="default: from the ending of OUT (.ftm.txt is famitracker; a plain .txt is famistudio, so use -f famitracker for a FamiTracker file named .txt)")
     p.add_argument("--volume", metavar="V", default="1", help="(wav) master volume: 0.5, 50%% or -6dB (default 1)")
     p.add_argument("--normalize", action="store_true", help="(wav) scale the loudest sample to --peak; volume is applied after")
     p.add_argument("--peak", metavar="DB", default="-1", help="(wav) the level --normalize aims for (default -1 dBFS)")
@@ -338,7 +342,7 @@ def export_song_cmd(args):
     p.add_argument("--end", metavar="T", help="(wav) where to stop (default: the end of the song and its tail)")
     p.add_argument("--loops", type=int, default=0, metavar="N", help="(wav) trips round the loop after the first pass")
     p.add_argument("--tail", type=float, default=2.0, metavar="S", help="(wav) seconds to let the last notes ring (default 2)")
-    p.add_argument("--region", choices=("ntsc", "pal"), default="ntsc", help="(famistudio) the frame rate the file is timed for (default ntsc)")
+    p.add_argument("--region", choices=("ntsc", "pal"), default="ntsc", help="(famistudio, famitracker) the frame rate the file is timed for (default ntsc)")
     p.add_argument("--fs-version", metavar="X.Y.Z", default="4.5.3", help="(famistudio) the FamiStudio version the file says it is from (default 4.5.3)")
     add_library_options(p)
     a = p.parse_args(glue(args, "--volume", "--peak"))

@@ -367,8 +367,9 @@ class FileMenu:
                               note="Trips only count when the song loops; the last notes ring for 2 seconds.",
                               apply=lambda v: self.export_choose(fmt, **v))
             return True
-        if fmt == "famistudio":
-            self.show_options("Export FamiStudio text", [("region", "Timing", [("ntsc", "NTSC"), ("pal", "PAL")], 0)],
+        if fmt in ("famistudio", "famitracker"):
+            self.show_options("Export %s text" % ("FamiStudio" if fmt == "famistudio" else "FamiTracker"),
+                              [("region", "Timing", [("ntsc", "NTSC"), ("pal", "PAL")], 0)],
                               ok="Choose file...", note="V1-V4 and one DPCM track only; what is left out is reported.",
                               apply=lambda v: self.export_choose(fmt, **v))
             return True
@@ -389,7 +390,7 @@ class FileMenu:
         return pkg, sid
 
     def export_as(self, fmt, path, loops=0, normalize=False, part="song", region="ntsc"):
-        """Write the open song to `path` as wav, mid, mml, famistudio or csp with exporter.export_song, the code
+        """Write the open song to `path` as wav, mid, mml, famistudio, famitracker or csp with exporter.export_song, the code
         `python -m chipsynth export-song` runs.  A file it replaces is copied to backups first.  Returns True."""
         if self.song is None:
             self.say("There is no song to export.", 3.0)
@@ -415,7 +416,7 @@ class FileMenu:
             self.say("Can't export %s: %s" % (path.name, e), 8.0)
             return False
         lines = list(r.notes)
-        if fmt != "famistudio":                          # only FamiStudio's notes include plain facts
+        if fmt not in ("famistudio", "famitracker"):     # only these two's notes include plain facts
             lines = ["warning: " + x for x in lines]
         else:
             lines = [x if x.startswith(WARNING) else "note: " + x for x in lines]

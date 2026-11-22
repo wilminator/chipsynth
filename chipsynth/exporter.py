@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Michael Allen Wilmes
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mid, mml or csp.
+"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mid, mml, csp, famistudio or famitracker.
+(A plain .txt is FamiStudio's text format; FamiTracker's ends in .ftm.txt or is asked for with fmt="famitracker".)
 
     pkg = open_source("music/forest.csp")
     r = export_song(pkg, "dawn", "dawn.wav", AudioOptions(volume=0.8, normalize=True, start=frames("2s"), loops=1))
@@ -25,8 +26,9 @@ from .player import TunePlayer
 from .song import Song
 from .synth import RATE, to_pcm16
 
-FORMATS = ("wav", "mid", "mml", "csp", "famistudio")
+FORMATS = ("wav", "mid", "mml", "csp", "famistudio", "famitracker")
 SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp", ".txt": "famistudio"}
+FAMITRACKER_ENDING = ".ftm.txt"                  # a plain .txt is FamiStudio's own text format: this one is FamiTracker's
 
 
 class ExportError(Exception):
@@ -205,14 +207,17 @@ def format_of(path, fmt=None):
         if fmt.lower() not in FORMATS:
             raise ExportError("unknown format '%s' (formats: %s)" % (fmt, ", ".join(FORMATS)))
         return fmt.lower()
+    if str(path).lower().endswith(FAMITRACKER_ENDING):
+        return "famitracker"
     f = SUFFIXES.get(Path(path).suffix.lower())
     if not f:
-        raise ExportError("can't tell the format from '%s'; end it in %s or give --format" % (path, ", ".join(SUFFIXES)))
+        raise ExportError("can't tell the format from '%s'; end it in %s or %s, or give --format"
+                          % (path, ", ".join(SUFFIXES), FAMITRACKER_ENDING))
     return f
 
 
 def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region="ntsc", fs_version="4.5.3"):
-    """Write song `song_id` of `pkg` to `path` as wav, mid, mml or csp (see the module doc).  Returns a Result."""
+    """Write song `song_id` of `pkg` to `path` as wav, mid, mml, csp, famistudio or famitracker (see the module doc).  Returns a Result."""
     opts = opts or AudioOptions()
     fmt = format_of(path, fmt)
     song_id = pick_song(pkg, song_id)
@@ -232,6 +237,13 @@ def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region="ntsc"
         elif fmt == "famistudio":
             from .formats import famistudio_export
             text, rep = famistudio_export.dump(pkg.tune(song_id, lib), region, fs_version, name=song_id if not pkg.songs[song_id].title else None)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8", newline="\n")
+            r.written = [path]
+            r.notes += rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
+        elif fmt == "famitracker":
+            from .formats import famitracker_export
+            text, rep = famitracker_export.dump(pkg.tune(song_id, lib), region, name=song_id if not pkg.songs[song_id].title else None)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8", newline="\n")
             r.written = [path]
