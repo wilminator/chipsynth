@@ -66,6 +66,8 @@ class Project:
     instruments: dict = field(default_factory=dict)    # name -> {"attrs", "envelopes": {type: attrs}, "maps": [attrs]}
     arpeggios: dict = field(default_factory=dict)      # name -> attrs
     songs: list = field(default_factory=list)          # [Song]
+    skipped: dict = field(default_factory=dict)        # sample name -> why it could not be rebuilt (the .fms reader fills it)
+    format_version: int = 0                            # the .fms project format version (0 for text)
 
 
 @dataclass
@@ -258,14 +260,32 @@ class Result:
     report: Report
 
 
+def check_version(version, report):
+    """Say in the Report what FamiStudio would do with a text file of this Version.  FamiStudio's own reader only takes a
+    file whose version starts with the first three characters of its own (4.5 now) and refuses any other; chipsynth
+    reads any file that has the grammar, and says so when FamiStudio would not."""
+    report.note("written by FamiStudio %s" % version)
+    if not version.startswith("4."):
+        report.approx("the file says it is from FamiStudio %s, not a 4.x release: FamiStudio itself refuses a file whose version "
+                      "does not start like its own (4.5), so this text may not mean what chipsynth reads it as" % version)
+    elif not version.startswith("4.5"):
+        report.note("FamiStudio 4.5 would refuse this file (it only opens text whose version starts with 4.5); it is read anyway")
+
+
 def load(text, song=None, region=None):
     """FamiStudio text -> Result.  `song` picks one song by name or 1-based number (default: all);
     `region` 'ntsc' or 'pal' overrides the file's PAL flag."""
     prj = parse(text)
     report = Report()
-    pal = (region == "pal") if region else prj.attrs.get("PAL", "false").lower() == "true"
     if prj.attrs.get("Version"):
-        report.note("written by FamiStudio %s" % prj.attrs["Version"])
+        check_version(prj.attrs["Version"], report)
+    return load_project(prj, song=song, region=region, report=report)
+
+
+def load_project(prj, song=None, region=None, report=None):
+    """A parsed Project (from the text or the binary reader) -> Result: the conversion both importers share."""
+    report = report if report is not None else Report()
+    pal = (region == "pal") if region else prj.attrs.get("PAL", "false").lower() == "true"
     report.note("%s timing, %s tempo" % ("PAL" if pal else "NTSC", prj.attrs.get("TempoMode", "FamiStudio")))
     if prj.attrs.get("Tuning", "440") != "440":
         report.approx("the tuning is %s Hz; chipsynth plays A4 at 440 Hz" % prj.attrs["Tuning"])
@@ -419,7 +439,7 @@ class _Ctx:
             if key not in self.sample_names:
                 data = self.prj.samples.get(sname)
                 if data is None:
-                    self.report.drop("the DPCM sample '%s' is not in the file" % sname)
+                    self.report.drop(self.prj.skipped.get(sname) or "the DPCM sample '%s' is not in the file" % sname)
                     return None
                 n = _letters(sname, self.sample_used)
                 self.samples[n] = dpcm.Sample(name=n, rate=pitch, tracks=[[bytes(data[0])]])

@@ -157,7 +157,10 @@ Author: Mike.  Status: design talk in progress.  Built so far: see 'Built' at th
   python -m chipsynth generate fight --seed 3 --dac --dac-bass --voice -o fight.mml
   ```
 
-  In the composer, `Ctrl+N` accepts the words `dac`, `dac-bass` and `voice` after the kind, seed and mood.
+  In the composer, the New dialog (`Ctrl+N`) has a toggle for each of the words `dac`, `dac-bass` and `voice` (and the effect words
+  below), and `new_from_generator` accepts them typed after the kind, seed and mood. A game's music table can carry the effect
+  words the same way (`fx`, a list of words or `"all"`, and `degrees`, true / false, both off by default) once its reader passes
+  them on to `generate(..., fx=, degrees=)` (the reader lives in the game, not here).
 - **Lookup order:** the place's own entry, then its kind's `.default`, then the built-in defaults.
 - **Built-in transition defaults:** cut for fight, boss, title, victory, game over; fade for world, maze, town.
 - **Editing:** a Music screen in the maker with pickers (contexts list; tune picker with a "Generated" row; transition, mood,
@@ -226,7 +229,7 @@ Old speeches contain none, so old games play unchanged. Ignored away from a town
 `off`; `slide n` glides into the NEXT note only (from the previous note's pitch; an instrument's `slide=` default applies to every
 note). All of them can be instrument keys or `[fx]` sets (`fx wobble`, library music/lib/fx.mml). Vibrato rate*0.8 Hz;
 pulse-width sweep is a triangle at rate*0.5 Hz; the synth keeps the phase exact so chunking never changes the sound. The generator
-does not use them yet.
+uses them through its opt-in effect words (see 'Generator effect options').
 
 ## Built: key / degree mode (slice 2)
 `key c major` (any tonic with # or -, modes major/minor/ionian/dorian/phrygian/lydian/mixolydian/aeolian/locrian,
@@ -235,3 +238,40 @@ pentatonic, minor-pentatonic, or a name from a `[key]` section: `dream = 0 2 3 7
 7-note scale has 8 = the octave and 9 = the 2nd above it; a pentatonic scale has 6 = the octave. `+` / `-` raise / lower a
 semitone; `:` starts a length (`5:8.`, `3:4;`); a bare degree uses `l`. `o4`, `<` and `>` still move the octave; letter notes
 and the `5c8` octave prefix are not used while a key is on. The key belongs to the voice (patterns inherit it).
+
+## Generator effect options (added 2026-11-22)
+The generator can put the engine's effects, degrees, echo and filter to work. Every one is an **opt-in word**: with none of them the
+text is exactly what it was (a test pins the output of a table of kinds, seeds and moods, with and without the DAC words), so games
+with fixed seeds keep their music. The words never move a note; they add header lines and inline words to the same notes. Each
+draws on a random generator of its own, so switching one on never changes another one's choices. Words: `echo reverb filter
+vibrato slide sweep` (together `fx` / `fx="all"`) and `degrees`. In the song's first line the record lists the ones that really
+wrote something (`fx=echo+filter+degrees`); a word a kind has nothing for (a filter on a victory jingle) writes nothing and is
+not recorded. Tables by kind (the mood nudges them), all in `musicgen.py`:
+- **echo** (header `echo`): the delay is a beat fraction of the song's tempo, clamped to 20-1000 ms: an eighth in a fight and a
+  victory, a dotted eighth in a boss, world, town and title, a whole beat in a maze and game over; feedback 20-50 %, mix 14-30 %;
+  ping-pong (`wide`) in world, maze, title and game over. Calm adds feedback and mix, bright takes mix away, dark adds both,
+  tense adds feedback.
+- **reverb** (header `reverb`): 2 (victory, fight) up to 7 (maze, game over); calm and dark add 2, bright takes 1 away.
+- **sends** (with echo or reverb): lead 15 (the default, not written), arpeggio 5-12, bass 0 (maze 6, game over 8, whose bass is a
+  pad), so the bass never gets muddy; the drums were already dry.
+- **filter** (`filter lp,cut,res` and, where listed, `fsweep`): boss lead (the buzz saw) `lp,7,3` swept 4-13 at rate 2 and its bass
+  `lp,9,1`; fight lead `lp,10,2` swept 7-13 slowly; world arpeggio `lp,10,1` swept; maze lead and pad swept (the pad becomes a saw,
+  or a pulse if `sweep` is also on); town arpeggio; title lead and arpeggio; game over pad (a saw). Never on victory or the
+  drums. Calm and dark close the cutoff (-1, -2), bright opens it (+2); tense adds resonance. Resonance stays at 3 or less because
+  a resonant peak on a note near the cutoff is a big level boost.
+- **vibrato**: `vib rate,depth` on the lead's notes of a quarter or longer (a game over: an eighth or longer), `vib off` before the
+  short ones, rate 4-6, depth 3-5; tense faster and deeper, calm and dark slower.
+- **slide**: `slide n` before a lead note that touches the one before it (no rest between) and leaps at least 3-4 semitones
+  (chance 25-35 %; a victory 2 semitones, 50 %; a game over any step, 90 %, long glides); the fight and boss bass slide into their
+  octave jumps. The length never passes the note's own length.
+- **sweep**: `pws from,to,rate` on a pulse arpeggio (fight, boss, world, town, title, victory), on a pulse lead (`lead`, `lead2`,
+  `bright`, `organ`: so not a flute, a buzz or a calm mood) in fight, world, title and victory, and on the maze and game-over pad,
+  which `wave pulse` turns into a pulse pad. Calm slows it, tense speeds it and narrows its low end, bright and dark move its top.
+- **volume**: echo, reverb and a filter each add level, so with them on the three melodic voices start one step quieter per word
+  (up to three); a measured 8 second render of every kind with all six words peaks at about 1.0 (the plain tune peaks near 0.8).
+- **degrees**: the lead, arpeggio and bass voice lines start `key TONIC MODE` and write `oN`, a digit 1-7 and `:length` (`o4 1:4 3 5 | `);
+  the drums keep their letters. Changing the tonic on the key lines transposes the song. A fix came with it: in key mode the
+  words `filter`, `fsweep`, `fx`, `arp` and `adsr` begin with a note letter, and the parser used to call them letter notes.
+- **Exporters:** WAV, MIDI, MML and package writers need nothing special. The FamiStudio writer already listed echo / reverb, slide,
+  vibrato, pulse sweeps and filters among what it leaves out; it now also says "filter sweep", and writes equal instruments once
+  (a vibrato switching on and off no longer makes dozens of identical instruments). GoatTracker has no writer yet.

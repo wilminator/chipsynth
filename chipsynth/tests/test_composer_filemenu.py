@@ -15,12 +15,14 @@ import numpy as np
 import pygame
 
 from chipsynth import midi, mml, musicgen, package as pk
+from chipsynth.composer import fileops as fo
 from chipsynth.composer.app import Composer
 from chipsynth.composer.filemenu import significant
 from chipsynth.composer.prefs import Prefs
 from chipsynth.formats import famistudio_text as fam
 from chipsynth.song import Song
 from chipsynth.tests.test_goattracker_import import C4, sng, pat, gt
+from chipsynth.tests import test_sidwizard_import as swt
 
 DATA = Path(__file__).parent / "data" / "famistudio"
 TINY = (DATA / "tiny.txt").read_text()
@@ -408,6 +410,47 @@ class ImportTests(Base):
         self.assertEqual(a.song_id, "two:two_Main_Theme")
         self.assertTrue(pk.load(self.dir / "two.csp").samples)
 
+    def test_famistudio_project_fms_opens_like_text_and_reports_what_it_left_out(self):
+        from chipsynth.tests.test_famistudio_binary import tiny_fms
+        a = self.a
+        self.assertEqual(fo.kind_of("x.fms"), "famistudio_fms")
+        p = self.write("tiny.fms", tiny_fms())
+        a.import_begin(p)
+        self.assertNotEqual(a.overlay, "fileopts")               # one song: no dialog
+        self.assertEqual(a.source, "")
+        self.assertTrue(any("kick" in n.lower() for n in a.ed.sample_names()), a.ed.sample_names())
+        self.assertTrue(significant(a.last_report[1]))
+        self.assertTrue(any("format version 19" in x for x in a.last_report[1]))
+
+    def test_famistudio_project_with_two_songs_asks_which(self):
+        from chipsynth.tests.test_famistudio_binary import tiny_project, write_fms
+        a = self.a
+        proj = tiny_project()
+        proj["songs"].append(dict(proj["songs"][0], id=6, name="Second Theme"))
+        a.import_begin(self.write("two.fms", write_fms(proj)))
+        self.assertEqual(a.overlay, "fileopts")
+        a.frame()
+        songs = next(r for r in a.fileopts["rows"] if r["key"] == "song")
+        self.assertEqual([t for _, t in songs["choices"]], ["All 2 songs", "Main Theme", "Second Theme"])
+        self.click(a.menu_geo["opts"]["ok"])
+        self.assertEqual(sorted(pk.load(self.dir / "two.csp").songs), ["two_Main_Theme", "two_Second_Theme"])
+
+    def test_famistudio_project_that_is_too_new_says_so(self):
+        import struct
+        from chipsynth.tests.test_famistudio_binary import tiny_fms
+        data = bytearray(tiny_fms())
+        data[4:8] = struct.pack("<i", 40)
+        a = self.a
+        self.assertFalse(a.import_file(self.write("new.fms", bytes(data))))
+        self.assertIn("newer", a.message)
+        self.assertFalse(a.import_file(self.write("junk.fms", b"hello hello hello"), "famistudio_fms"))
+        self.assertIn("not a FamiStudio", a.message)
+
+    def test_the_import_menu_lists_the_fms_project(self):
+        self.open_menu()
+        self.click(self.row("Import"))
+        self.row("FamiStudio project", sub=True)
+
     def test_famistudio_single_song_imports_without_a_dialog(self):
         a = self.a
         a.import_begin(self.write("one.txt", TINY))
@@ -495,6 +538,13 @@ class ImportTests(Base):
         self.assertEqual(a.source, "")
         self.assertNotEqual(a.label, "Test")
 
+    def test_dropping_a_fms_project_imports_it(self):
+        from chipsynth.tests.test_famistudio_binary import tiny_fms
+        a = self.a
+        a.frame([pygame.event.Event(pygame.DROPFILE, file=str(self.write("d.fms", tiny_fms())))])
+        self.assertEqual(a.source, "")
+        self.assertNotEqual(a.label, "Test")
+
 
 class ExportTests(Base):
     def frames(self, path):
@@ -554,6 +604,80 @@ class ExportTests(Base):
         self.assertIn("PAL timing", " ".join(lines))
         a.frame()                                                    # the overlay draws
 
+    def test_famistudio_dialog_offers_a_version_row_and_remembers_the_choice(self):
+        a = self.a
+        asked = []
+        target = self.dir / "v.txt"
+        a.choose_path = lambda save, title, pattern, ext="", initialfile="", initialdir=None: asked.append(save) or str(target)
+        a.export_dialog("famistudio")
+        rows = {r["key"]: r for r in a.fileopts["rows"]}
+        self.assertEqual([c[0] for c in rows["stamp"]["choices"]], ["default", "reference", "typed", "none"])
+        self.assertEqual(rows["stamp"]["i"], 0)
+        a.fileopts_step(1, 3)                                         # None
+        a.fileopts_finish(True)
+        self.assertEqual(a.prefs.fs_stamp, "none")
+        self.assertNotIn("Version", target.read_text().splitlines()[0])
+        self.assertTrue(any("no Version" in x for x in a.last_report[1]))
+        a.frame()
+        a.export_dialog("famistudio")                                 # the dialog opens on the last choice
+        self.assertEqual(a.fileopts["rows"][1]["i"], 3)
+        a.fileopts_finish(False)
+
+    def test_famistudio_dialog_typed_version_is_asked_checked_and_remembered(self):
+        a = self.a
+        target = self.dir / "t.txt"
+        a.choose_path = lambda *args, **kw: str(target)
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 2)                                         # typed
+        a.fileopts_finish(True)
+        self.assertEqual(a.overlay, "prompt")
+        a.prompt["text"] = "four"
+        a.finish_prompt(True)
+        self.assertFalse(target.exists())                             # refused, says why
+        self.assertIn("looks like 4.2.0", a.message)
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 2)
+        a.fileopts_finish(True)
+        a.prompt["text"] = "4.2.0"
+        a.finish_prompt(True)
+        self.assertIn('Version="4.2.0"', target.read_text().splitlines()[0])
+        self.assertEqual((a.prefs.fs_stamp, a.prefs.fs_typed), ("typed", "4.2.0"))
+        a.export_dialog("famistudio")
+        self.assertIn("4.2.0", a.fileopts["rows"][1]["choices"][2][1])
+        a.fileopts_finish(False)
+
+    def test_famistudio_dialog_reference_file_is_chosen_then_the_output(self):
+        a = self.a
+        ref = self.write("ref.txt", 'Project Version="4.2.0" TempoMode="FamiStudio"\n')
+        target = self.dir / "r.txt"
+        asked = []
+        a.choose_path = lambda save, title, pattern, ext="", initialfile="", initialdir=None: asked.append(save) or str(target if save else ref)
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 1)                                         # reference
+        a.fileopts_finish(True)
+        self.assertEqual(asked, [False, True])
+        self.assertIn('Version="4.2.0"', target.read_text().splitlines()[0])
+        self.assertEqual((a.prefs.fs_stamp, a.prefs.fs_ref), ("reference", str(ref)))
+        self.assertTrue(any("copied from the reference file ref.txt" in x for x in a.last_report[1]))
+
+    def test_famistudio_dialog_reference_cancelled_or_not_famistudio_writes_nothing(self):
+        a = self.a
+        target = self.dir / "n.txt"
+        a.choose_path = lambda save, *args, **kw: ""
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 1)
+        a.fileopts_finish(True)
+        self.assertFalse(target.exists())
+        bad = self.write("bad.txt", "not famistudio\n")
+        a.choose_path = lambda save, *args, **kw: str(target if save else bad)
+        a.export_dialog("famistudio")
+        a.fileopts_step(1, 1)
+        a.fileopts_finish(True)
+        self.assertFalse(target.exists())
+        self.assertIn("not a FamiStudio text file", a.message)
+
+    def test_midi_export_writes_the_drum_lanes_and_names_what_it_cannot(self):
+
     def test_goattracker_export_asks_for_its_options_and_reports_what_it_left_out(self):
         a = self.a
         self.assertTrue(a.export_dialog("goattracker"))
@@ -577,7 +701,23 @@ class ExportTests(Base):
         song = Song.from_mml(musicgen.generate("town", 1, "", None, dac=True), a.lib)
         self.assertTrue(a.load_song(song, "Drums"))
         self.assertTrue(a.export_as("mid", self.dir / "d.mid"))
-        self.assertTrue(any(x.startswith("left out:") and "drum" in x for x in a.last_report[1]), a.last_report)
+        _, tracks = midi.parse((self.dir / "d.mid").read_bytes())
+        self.assertTrue(any(ev[1] == "on" and ev[4] == 9 for t in tracks for ev in t))
+        self.assertFalse(any("drum" in x for x in a.last_report[1]), a.last_report)
+        song = Song.from_mml("[sample]\nkit_hey = kit_hey\nV1: c1\nD1: kit_hey4\n", a.lib)
+        self.assertTrue(a.load_song(song, "Hey"))
+        self.assertTrue(a.export_as("mid", self.dir / "h.mid"))
+        self.assertTrue(any(x.startswith("warning:") and "kit_hey" in x for x in a.last_report[1]), a.last_report)
+
+    def test_opening_a_midi_with_drums_puts_them_on_d1_d2_and_reports_what_the_kit_lacks(self):
+        import struct
+        a = self.a
+        ev = b"".join(midi._varlen(d) + b for d, b in [(0, bytes([0x99, 36, 100])), (12, bytes([0x99, 36, 0])), (84, bytes([0x99, 56, 100])),
+                                                         (12, bytes([0x99, 56, 0]))]) + b"\x00\xff\x2f\x00"
+        data = midi._chunk(b"MThd", struct.pack(">HHH", 0, 1, 96)) + midi._chunk(b"MTrk", ev)
+        self.assertTrue(a.import_file(self.write("beat.mid", data)))
+        self.assertEqual(len(a.roll.dac[0]), 1)
+        self.assertTrue(any("Cowbell" in x for x in a.last_report[1]), a.last_report)
 
     def test_a_clean_export_just_reports_in_the_status_line(self):
         a = self.a
@@ -674,6 +814,72 @@ class ReportOverlayTests(Base):
         a.show_report("Facts", ["note: written by FamiStudio 4.5.3"], "ok")
         self.assertIsNone(a.overlay)
         self.assertEqual(a.last_report[0], "Facts")
+
+
+class SidWizardImportTests(Base):
+    """File > Import > SID-Wizard (.swm): the same flow as GoatTracker, minus multispeed (the file records its own)."""
+
+    def swm(self, name="tune.swm", rows=None, **kw):
+        return self.write(name, swt.one(rows or [(swt.C4, 1), (swt.OFF,)], **kw))
+
+    def test_options_ask_for_region_and_subtune_only(self):
+        a = self.a
+        self.assertTrue(a.import_begin(self.swm()))
+        self.assertEqual(a.overlay, "fileopts")
+        a.frame()
+        self.assertEqual([r["key"] for r in a.fileopts["rows"]], ["region", "song"])
+        a.frame([key(pygame.K_RIGHT)])                              # PAL -> NTSC
+        self.click(a.menu_geo["opts"]["ok"])
+        self.assertIsNone(a.overlay)
+        self.assertEqual(a.tune.nvoices, 3)
+        self.assertEqual(a.song.bpm, 150)
+
+    def test_the_report_is_shown_for_what_was_left_out(self):
+        a = self.a
+        self.assertTrue(a.import_file(self.swm(rows=[(swt.C4, 1, 0x08, 0x35), (swt.OFF,)])))
+        self.assertTrue(any(x.startswith("left out:") and "set vibrato" in x for x in a.last_report[1]), a.last_report[1])
+        self.assertEqual(a.overlay, "report")
+        self.assertIn("SID-Wizard", a.last_report[0])
+
+    def test_the_import_menu_row_and_dropping_a_swm(self):
+        a = self.a
+        asked = []
+        p = self.swm("viamenu.swm")
+        a.choose_path = lambda save, title, pattern, *rest, **kw: asked.append((save, title, pattern)) or str(p)
+        self.open_menu()
+        self.click(self.row("Import"))
+        self.click(self.row("SID-Wizard", sub=True))
+        self.assertEqual(asked, [(False, "Import SID-Wizard song", "*.swm")])
+        self.assertEqual(a.overlay, "fileopts")
+        a.frame([key(pygame.K_ESCAPE)])
+        a.frame([pygame.event.Event(pygame.DROPFILE, file=str(self.swm("dropped.swm")))])
+        self.assertEqual(a.overlay, "fileopts")
+
+    def test_two_subtunes_go_into_a_package_beside_the_file(self):
+        a = self.a
+        data = swt.swm([[1, 0xFF, 0], [0xFE], [0xFE]] * 2, [swt.pattern((swt.C4, 1), (swt.OFF,))], [swt.instrument()], tempos=[(0x86, 0x86)] * 2)
+        p = self.write("two.swm", data)
+        self.assertTrue(a.import_file(p))
+        self.assertTrue((self.dir / "two.csp").exists())
+        from chipsynth import package as pk
+        self.assertEqual(sorted(pk.load(self.dir / "two.csp").songs), ["two_1", "two_2"])
+
+    def test_a_bad_file_is_a_message_not_a_crash(self):
+        a = self.a
+        self.assertFalse(a.import_file(self.write("bad.swm", b"\0\0nope"), "sidwizard"))
+        self.assertIn("SID-Wizard", a.message)
+        self.assertEqual(a.label, "Test")
+
+    def test_fileops_names_the_subtunes_without_a_window(self):
+        from chipsynth.composer import fileops as fo
+        p = self.swm()
+        self.assertEqual(fo.kind_of(p), "sidwizard")
+        self.assertEqual(fo.song_names("sidwizard", p), ["subtune 1"])
+        loaded = fo.read_import("sidwizard", p, region="ntsc")
+        self.assertEqual(loaded.songs[0][0], "tune")
+        self.assertEqual(loaded.songs[0][1].bpm, 150)
+        with self.assertRaises(fo.FileOpError):
+            fo.song_names("sidwizard", self.write("x.swm", b"nope"))
 
 
 if __name__ == "__main__":

@@ -16,6 +16,12 @@ Options that switch the DAC lanes on (all off by default; with them off the text
     generate("fight", 42, dac_bass=True)             # the bass as pitched samples on D2 instead of the synth voice
     generate("boss", 7, voice=True)                  # a rare one-shot "hey" accent on D1 (boss intro, turnarounds)
 
+Options that put the engine's effects to work (all off by default; with them off the text is exactly what it always was):
+
+    generate("town", 5, fx=("echo", "reverb"))       # a tempo-synced echo and a room, with sends set per voice
+    generate("boss", 7, fx="all")                    # echo reverb filter vibrato slide sweep, as far as the kind has them
+    generate("fight", 3, degrees=True)               # the melody, arpeggio and bass as scale degrees under a `key` line
+
 The samples are the built-in kit (kit.py): a song names them in its [sample] section and the parser finds them with no
 files, in a package they are embedded, and a file of the same name in music/samples replaces one.
 """
@@ -82,6 +88,42 @@ VOICE_SPOTS = {"boss": ((0, 0, 1.0), (-1, 8, 1.0)), "fight": ((-1, 12, 0.5),), "
                "world": ((-1, 12, 0.5),), "victory": ((-1, 4, 1.0),)}
 PAN = {1: 0, 2: -3, 3: 0, 4: 2}
 
+# ---- the effect options (fx=...).  Everything here is a table by kind; the mood nudges it.  They draw on a random
+# generator of their own, so the notes never change.
+FX_WORDS = ("echo", "reverb", "filter", "vibrato", "slide", "sweep")
+# echo: delay in beats, feedback %, mix %, ping-pong
+ECHO = {"fight": (0.5, 25, 16, False), "boss": (0.75, 35, 20, False), "world": (0.75, 35, 24, True),
+        "maze": (1.0, 50, 28, True), "town": (0.75, 30, 22, False), "title": (0.75, 40, 24, True),
+        "victory": (0.5, 20, 14, False), "gameover": (1.0, 45, 30, True)}
+REVERB = {"fight": 2, "boss": 3, "world": 4, "maze": 7, "town": 5, "title": 5, "victory": 2, "gameover": 7}
+# the bus send of the lead, the arpeggio and the bass voice (15 is the default and is not written); the bass stays dry
+SEND = {"fight": (15, 5, 0), "boss": (15, 5, 0), "world": (15, 10, 0), "maze": (15, 12, 6), "town": (15, 10, 0),
+        "title": (15, 10, 0), "victory": (15, 8, 0), "gameover": (15, 12, 8)}
+# filter: voice -> (type, cutoff, resonance, fsweep (from, to, rate) or None); a victory jingle is too short for one
+FILTER = {"fight": {1: ("lp", 10, 2, (7, 13, 1))},
+          "boss": {1: ("lp", 7, 3, (4, 13, 2)), 3: ("lp", 9, 1, None)},
+          "world": {2: ("lp", 10, 1, (8, 13, 1))},
+          "maze": {1: ("lp", 9, 0, (6, 11, 1)), 3: ("lp", 6, 1, (4, 9, 1))},
+          "town": {2: ("lp", 8, 1, (6, 11, 1))},
+          "title": {1: ("lp", 9, 2, (5, 13, 1)), 2: ("lp", 10, 1, None)},
+          "victory": {},
+          "gameover": {3: ("lp", 5, 1, (3, 8, 1))}}
+FILTER_CUT = {"calm": -1, "tense": 0, "bright": 2, "dark": -2}
+FILTER_RES = {"calm": -1, "tense": 1, "bright": 0, "dark": 1}
+# vibrato on the lead's held notes: rate, depth, the shortest note (in 16ths) that gets it
+VIBRATO = {"fight": (6, 3, 4), "boss": (5, 4, 4), "world": (5, 3, 4), "maze": (4, 4, 4), "town": (4, 3, 4),
+           "title": (5, 3, 4), "victory": (6, 3, 4), "gameover": (4, 5, 2)}
+# slide: voice -> (chance, ticks, smallest leap in semitones, shortest note in 16ths); glides only join notes that touch
+SLIDE = {"fight": {1: (0.25, 6, 4, 2), 3: (0.4, 6, 12, 2)}, "boss": {1: (0.25, 6, 4, 2), 3: (0.5, 6, 12, 2)},
+         "world": {1: (0.35, 10, 3, 2)}, "maze": {1: (0.35, 12, 3, 2)}, "town": {1: (0.35, 10, 3, 2)},
+         "title": {1: (0.35, 10, 3, 2)}, "victory": {1: (0.5, 8, 2, 2)}, "gameover": {1: (0.9, 18, 1, 2)}}
+# pulse-width sweeps: where (a pulse arpeggio, a pulse lead, or a pad bass that becomes pulse) -> (from %, to %, rate)
+SWEEP = {"fight": {"arp": (10, 45, 3), "lead": (20, 45, 1)}, "boss": {"arp": (8, 40, 3)},
+         "world": {"arp": (12, 50, 2), "lead": (30, 55, 1)}, "maze": {"pad": (30, 70, 1)}, "town": {"arp": (15, 50, 2)},
+         "title": {"arp": (20, 70, 1), "lead": (25, 60, 1)}, "victory": {"arp": (12, 50, 3), "lead": (20, 50, 2)},
+         "gameover": {"pad": (25, 60, 1)}}
+PULSE_INSTR = ("lead", "lead2", "bright", "organ", "arp")
+
 
 # ------------------------------------------------------------------ the header record
 def _sum(text):
@@ -99,6 +141,8 @@ def meta(text):
                      "tempo": int(d["tempo"]), "sum": d["sum"]}
                 if d.get("dac"):
                     m["dac"] = d["dac"]                    # letters: d drums, b bass, v voice accent (absent = none)
+                if d.get("fx"):
+                    m["fx"] = d["fx"]                      # words joined by +: the effects written, and degrees
                 return m
             except (KeyError, ValueError):
                 return None
@@ -115,6 +159,29 @@ def dac_options(text):
     m = meta(text)
     code = m.get("dac", "") if m else ""
     return "d" in code, "b" in code, "v" in code
+
+
+def fx_options(text):
+    """(effects, degrees) switched on in a generated tune's record: the effect words in FX_WORDS order, and whether the
+    notes are written as scale degrees; ((), False) for a plain or hand-written tune."""
+    m = meta(text)
+    words = (m.get("fx", "") if m else "").split("+")
+    return tuple(w for w in FX_WORDS if w in words), "degrees" in words
+
+
+def fx_words(fx):
+    """The effect words asked for, in FX_WORDS order.  fx may be True, 'all' / 'fx', one word, or a list or string of words."""
+    if not fx:
+        return ()
+    if fx is True:
+        return FX_WORDS
+    items = re.split(r"[,+\s]+", fx.strip().lower()) if isinstance(fx, str) else [str(w).lower() for w in fx]
+    if "all" in items or "fx" in items:
+        return FX_WORDS
+    bad = [w for w in items if w and w not in FX_WORDS]
+    if bad:
+        raise ValueError("unknown effect %r (effects are: %s)" % (bad[0], ", ".join(FX_WORDS)))
+    return tuple(w for w in FX_WORDS if w in items)
 
 
 # ------------------------------------------------------------------ composing
@@ -478,12 +545,46 @@ class Song:
 
 
 # ------------------------------------------------------------------ writing MML
+class VoiceFx:
+    """What the effect options add to one voice line: words written after every `@instrument` (sends, filter, pulse
+    sweep), vibrato switched on for the held notes, and slides into notes that touch the one before."""
+
+    def __init__(self, static="", vib=None, slide=None, rng=None):
+        self.static, self.vib, self.slide, self.rng = static, vib, slide, rng
+        self.vib_on, self.prev = False, None
+        self.used = set()                              # "vibrato" / "slide" once one has been written
+
+    def on_select(self):
+        self.vib_on = False                            # choosing an instrument starts it without vibrato
+        return self.static
+
+    def before(self, pitch, slots, legato):
+        out = ""
+        if self.vib:
+            rate, depth, shortest = self.vib
+            want = slots >= shortest
+            if want != self.vib_on:
+                out += ("vib %d,%d " % (rate, depth)) if want else "vib off "
+                self.vib_on = want
+                if want:
+                    self.used.add("vibrato")
+        if self.slide and legato and self.prev is not None:
+            chance, ticks, leap, shortest = self.slide
+            if slots >= shortest and abs(pitch - self.prev) >= leap and self.rng.random() < chance:
+                out += "slide %d " % max(1, min(ticks, 12 * slots))
+                self.used.add("slide")
+        self.prev = pitch
+        return out
+
+
 class Emitter:
-    def __init__(self):
+    def __init__(self, fx=None):
         self.oct = None
         self.inst = None
+        self.fx = fx                                   # a VoiceFx, or None for the plain text
+        self.end = None                                # where the last note ended, in 16ths from the start
 
-    def bar(self, events):
+    def bar(self, events, bar_no=0):
         toks, at = [], 0
         for s, ln, pitch, inst in sorted(events, key=lambda e: e[0]):
             if s > at:
@@ -492,7 +593,7 @@ class Emitter:
             if pitch is None:
                 toks += self.rests(ln)
             else:
-                toks.append(self.note(pitch, ln, inst))
+                toks.append(self.note(pitch, ln, inst, bar_no * 16 + s))
             at = s + ln
         if at < 16:
             toks += self.rests(16 - at)
@@ -501,17 +602,47 @@ class Emitter:
     def rests(self, slots):
         return ["r" + ("" if p == "8" else p) for p in duration_text(slots * SLOT)]
 
-    def note(self, pitch, slots, inst):
+    def note(self, pitch, slots, inst, at=0):
         out = ""
         if inst != self.inst:
             out += "@%s " % inst
             self.inst = inst
+            if self.fx:
+                out += self.fx.on_select()
+        if self.fx:
+            out += self.fx.before(pitch, slots, self.end == at)
+        self.end = at + slots
+        return out + self.pitch_text(pitch, slots)
+
+    def pitch_text(self, pitch, slots):
+        out = ""
         octv = pitch // 12
         if octv != self.oct:
             out += str(octv)
             self.oct = octv
         pieces = duration_text(slots * SLOT)
         out += note_name(pitch) + ("" if pieces[0] == "8" else pieces[0])
+        for extra in pieces[1:]:
+            out += "&" + extra
+        return out
+
+
+class DegreeEmitter(Emitter):
+    """The same notes written as scale degrees of the song's key (the voice line starts with `key c minor`): `o4`
+    moves the octave, a digit is the degree and `:4` its length.  Every note of the generator is in its scale."""
+
+    def __init__(self, tonic, scale, fx=None):
+        super().__init__(fx)
+        self.tonic, self.scale = tonic, scale
+
+    def pitch_text(self, pitch, slots):
+        out = ""
+        octv, semis = divmod(pitch - self.tonic, 12)
+        if octv != self.oct:
+            out += "o%d " % octv
+            self.oct = octv
+        pieces = duration_text(slots * SLOT)
+        out += str(self.scale.index(semis) + 1) + ("" if pieces[0] == "8" else ":" + pieces[0])
         for extra in pieces[1:]:
             out += "&" + extra
         return out
@@ -573,13 +704,90 @@ def dac_lanes(song, drums, bass, spots):
     return {k: lane for k, lane in ((1, d1), (2, d2)) if any(lane)}
 
 
-def generate(kind, seed, mood="", tempo=None, dac=False, dac_bass=False, voice=False):
+def _clamp(v, lo, hi):
+    return max(lo, min(hi, int(round(v))))
+
+
+def fx_plan(song, words, present):
+    """What the effect words add to this song: ([header lines], {voice number: VoiceFx}, {words applied for sure}).
+    present: the synth voices (1-3) the song has.  It draws on a random generator of its own, and every number is
+    clamped to what the parser accepts, so the notes never change and the text always parses."""
+    kind, mood = song.kind, song.mood
+    header, applied = [], set()
+    statics = {v: [] for v in present}
+    if "echo" in words:
+        beats, fb, mix, wide = ECHO[kind]
+        fb += {"calm": 5, "tense": 10, "dark": 10}.get(mood, 0)
+        mix += {"calm": 4, "bright": -4, "dark": 4}.get(mood, 0)
+        ms = _clamp(beats * 60000.0 / song.bpm, 20, 1000)
+        header.append("echo %dms,%d,%d%s" % (ms, _clamp(fb, 0, 70), _clamp(mix, 0, 45), ",wide" if wide else ""))
+        applied.add("echo")
+    if "reverb" in words:
+        header.append("reverb %d" % _clamp(REVERB[kind] + {"calm": 2, "dark": 2, "bright": -1}.get(mood, 0), 0, 15))
+        applied.add("reverb")
+    if "echo" in words or "reverb" in words:           # the bass stays dry, the arpeggio sits behind the lead
+        for v in present:
+            if SEND[kind][v - 1] != 15:
+                statics[v].append("send %d" % SEND[kind][v - 1])
+    pad = song.bass == "pad"
+    if "sweep" in words:
+        for key, v, inst in (("pad", 3, "pad"), ("arp", 2, song.arp), ("lead", 1, song.lead)):
+            if key not in SWEEP[kind] or v not in present or (key != "pad" and inst not in PULSE_INSTR) or (key == "pad" and not pad):
+                continue
+            lo, hi, rate = SWEEP[kind][key]
+            if mood == "calm":
+                rate = max(1, rate - 1)
+            elif mood == "tense":
+                rate, lo = min(15, rate + 1), max(5, lo - 5)
+            elif mood == "bright":
+                hi = min(90, hi + 10)
+            elif mood == "dark":
+                hi = max(lo + 10, hi - 15)
+            statics[v] += (["wave pulse"] if key == "pad" else []) + ["pws %d,%d,%d" % (lo, hi, rate)]
+            applied.add("sweep")
+    if "filter" in words:
+        for v, (typ, cut, res, sweep) in FILTER[kind].items():
+            if v not in present:
+                continue
+            dc = FILTER_CUT.get(mood, 0)
+            if v == 3 and pad and "wave pulse" not in statics[3]:   # a triangle has little to filter: the pad becomes a saw
+                statics[v].append("wave saw")
+            statics[v].append("filter %s,%d,%d" % (typ, _clamp(cut + dc, 0, 15), _clamp(res + FILTER_RES.get(mood, 0), 0, 15)))
+            if sweep:
+                statics[v].append("fsweep %d,%d,%d" % (_clamp(sweep[0] + dc, 0, 15), _clamp(sweep[1] + dc, 0, 15), sweep[2]))
+            applied.add("filter")
+    fxs = {}
+    for v in present:
+        vib = None
+        if "vibrato" in words and v == 1:
+            rate, depth, shortest = VIBRATO[kind]
+            rate, depth = {"calm": (rate - 1, depth - 1), "tense": (rate + 2, depth + 1), "bright": (rate + 1, depth),
+                           "dark": (rate - 1, depth + 1)}.get(mood, (rate, depth))
+            vib = (_clamp(rate, 1, 15), _clamp(depth, 1, 15), shortest)
+        slide = None
+        if "slide" in words and v in SLIDE[kind]:
+            chance, ticks, leap, shortest = SLIDE[kind][v]
+            if v == 1 and mood == "calm":
+                ticks = ticks * 3 // 2
+            elif v == 1 and mood == "tense":
+                chance = min(1.0, chance * 1.3)
+            slide = (chance, ticks, leap, shortest)
+        fxs[v] = VoiceFx(" ".join(statics[v]) + " " if statics[v] else "", vib, slide, random.Random("%s:%s:%s:fx:%d" % (kind, song.seed, mood, v)))
+    return header, fxs, applied
+
+
+def generate(kind, seed, mood="", tempo=None, dac=False, dac_bass=False, voice=False, fx=(), degrees=False):
     """A complete tune in MML.  kind: one of KINDS; mood: '', calm, tense, bright or dark.
 
     dac: the drums are samples on D1 / D2 (kick, snare, hats, crash, toms) instead of the noise voice.
     dac_bass: the bass is pitched samples on D2 instead of the synth voice (not for the pad-bass kinds, maze and gameover).
     voice: a rare one-shot "hey" on D1, only on a boss intro, a turnaround or the end of a jingle.
-    All three are off by default, and then the text is exactly what the generator has always written."""
+    fx: effects to add, any of FX_WORDS (or True / "all"): echo and reverb (a tempo-synced bus, sends set per voice), filter
+        (a low-pass, swept on some kinds), vibrato (the lead's held notes), slide (portamento into leaps), sweep (pulse
+        widths on a pulse arpeggio, pulse lead or pad).  A word a kind has nothing for (a filter on a victory jingle) adds
+        nothing and is not recorded.
+    degrees: write the melody, arpeggio and bass as scale degrees under a `key` line (the same notes, easier to transpose).
+    All of them are off by default, and then the text is exactly what the generator has always written."""
     if kind not in PRESETS:
         raise ValueError("unknown kind %r" % kind)
     song = Song(kind, int(seed), mood if mood in MOODS else "", tempo)
@@ -592,43 +800,64 @@ def generate(kind, seed, mood="", tempo=None, dac=False, dac_bass=False, voice=F
     if dac_bass:
         voices.pop(3)
     lanes = dac_lanes(song, dac, dac_bass, spots) if (dac or dac_bass or voice) else {}
-    em = {v: Emitter() for v in voices}
+    words = fx_words(fx)
+    degrees = bool(degrees)
+    head, fxs, applied = fx_plan(song, words, [v for v in voices if v <= 3]) if words else ([], {}, set())
+    if degrees:
+        scale = SCALES[song.mode]
+        em = {v: DegreeEmitter(song.tonic, scale, fxs.get(v)) if v <= 3 else Emitter() for v in voices}
+    else:
+        em = {v: Emitter(fxs.get(v)) for v in voices}
     name = "%s %d%s" % (kind.capitalize(), int(seed), " (%s)" % song.mood if song.mood else "")
-    extras = [w for w, on in (("drums", dac), ("bass", dac_bass), ("voice accent", voice)) if on]
-    lines = ["// generated:", "title " + name, "author chipsynth generator",
-             "comment %s in %s, %d bpm%s" % (kind, song.mode, song.bpm, ", DAC " + ", ".join(extras) if extras else ""),
-             "tempo %d" % song.bpm, "time 4/4"]
-    if song.once:
-        lines.append("once")
-    lines.append("")
     used = []
     for lane in lanes.values():
         for bar in lane:
             for _, sample, _ in bar:
                 if sample not in used:
                     used.append(sample)
+    trim = min(3, len({"echo", "reverb", "filter"} & applied))        # wet and resonant effects add level: the melodic voices make room
+    body = []
     if used:                                           # the kit is built in; declaring it lets the editor list it
-        lines.append("[sample]")
-        lines += ["%s = %s" % (sample, sample) for sample in used]
-        lines.append("")
+        body.append("[sample]")
+        body += ["%s = %s" % (sample, sample) for sample in used]
+        body.append("")
     dem = {k: DacEmitter() for k in lanes}
     for first in range(0, song.bars, 4):
         n = min(4, song.bars - first)
-        lines.append("// bars %d-%d" % (first + 1, first + n))
+        body.append("// bars %d-%d" % (first + 1, first + n))
         for v, bars in voices.items():
             setup = ""
             if first == 0:
-                setup = "l8 v%d pan %d " % (VOLUME[v], PAN[v])
-            text = " ".join(em[v].bar(bars[b]) + " |" for b in range(first, first + n))
-            lines.append("V%d: %s%s" % (v, setup, text))
+                setup = "l8 v%d pan %d " % (VOLUME[v] - (trim if v <= 3 else 0), PAN[v])
+                if degrees and v <= 3:
+                    setup += "key %s %s " % (note_name(song.tonic), song.mode)
+            text = " ".join(em[v].bar(bars[b], b) + " |" for b in range(first, first + n))
+            body.append("V%d: %s%s" % (v, setup, text))
         for k, bars in lanes.items():
             setup = "l8 pan %d " % DAC_PAN[k] if first == 0 else ""
             text = " ".join(dem[k].bar(bars[b]) + " |" for b in range(first, first + n))
-            lines.append("D%d: %s%s" % (k, setup, text))
-        lines.append("")
-    text = "\n".join(lines)
+            body.append("D%d: %s%s" % (k, setup, text))
+        body.append("")
+    for f in fxs.values():                             # vibrato and slide count once a note really got one
+        applied |= f.used
+    done = tuple(w for w in FX_WORDS if w in applied)
+    extras = [w for w, on in (("drums", dac), ("bass", dac_bass), ("voice accent", voice)) if on]
+    notes = ["DAC " + ", ".join(extras)] if extras else []
+    if done:
+        notes.append("fx " + "+".join(done))
+    if degrees:
+        notes.append("degrees")
+    lines = ["// generated:", "title " + name, "author chipsynth generator",
+             "comment %s in %s, %d bpm%s" % (kind, song.mode, song.bpm, "".join(", " + n for n in notes)),
+             "tempo %d" % song.bpm, "time 4/4"]
+    if song.once:
+        lines.append("once")
+    lines += head
+    lines.append("")
+    text = "\n".join(lines + body)
     code = ("d" if dac else "") + ("b" if dac_bass else "") + ("v" if voice else "")
-    record = "// generated: kind=%s mood=%s seed=%d tempo=%d%s sum=" % (kind, song.mood or "-", int(seed), song.bpm,
-                                                                      " dac=" + code if code else "")
+    fxcode = "+".join(done + (("degrees",) if degrees else ()))
+    record = "// generated: kind=%s mood=%s seed=%d tempo=%d%s%s sum=" % (
+        kind, song.mood or "-", int(seed), song.bpm, " dac=" + code if code else "", " fx=" + fxcode if fxcode else "")
     text = text.replace("// generated:", record + "00000000", 1)
     return text.replace("sum=00000000", "sum=" + _sum(text), 1)   # the sum covers all but the record line
