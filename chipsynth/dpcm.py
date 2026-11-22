@@ -115,11 +115,15 @@ def split_parts(data, max_part=MAX_PART):
     return [data[i:i + max_part] for i in range(0, len(data), max_part)]
 
 
-def convert(x, src_rate, rate=15, name="", stereo=False, normalise=True, fit=False, max_bytes=MAX_BYTES):
+def convert(x, src_rate, rate=15, name="", stereo=False, normalise=True, fit=False, max_bytes=MAX_BYTES,
+            gain=1.0, stats=None):
     """Float samples (n,) or (n, 2) at src_rate Hz -> Sample at DPCM rate index `rate`.
     stereo=True keeps two tracks (left, right) when the input has two channels; otherwise the channels are mixed.
     A delta sample can only move 2/64 of the range per step, so a loud sample is distorted by slope overload (as on the
-    NES); fit=True turns the level down until the steepest 1% of the slopes fit, giving a cleaner but quieter sample."""
+    NES); fit=True turns the level down until the steepest 1% of the slopes fit, giving a cleaner but quieter sample.
+    gain (a factor, 1.0 = none) is applied after normalising and before the fit.  When `stats` is a dict it is filled
+    with peak (the final level, 1.0 = full scale), clipped (samples beyond full scale, which the encoder clamps) and
+    frames (samples per track at the DPCM rate)."""
     if not 0 <= rate <= 15:
         raise DpcmError("rate is 0 to 15")
     x = np.asarray(x, dtype=np.float64)
@@ -132,10 +136,16 @@ def convert(x, src_rate, rate=15, name="", stereo=False, normalise=True, fit=Fal
         peak = max((float(np.abs(c).max()) for c in chans if len(c)), default=0.0)
         if peak > 0:
             chans = [c / peak * 0.98 for c in chans]
+    if gain != 1.0:
+        chans = [c * gain for c in chans]
     if fit:
         steep = max((float(np.percentile(np.abs(np.diff(c)), 99)) for c in chans if len(c) > 1), default=0.0)
         if steep > 2.0 / 63.0 / 1.0 * 0.5:
             chans = [c * (2.0 / 63.0 * 0.5 / steep) for c in chans]
+    if stats is not None:
+        stats["peak"] = max((float(np.abs(c).max()) for c in chans if len(c)), default=0.0)
+        stats["clipped"] = sum(int((np.abs(c) > 1.0).sum()) for c in chans)
+        stats["frames"] = max((len(c) for c in chans), default=0)
     tracks = []
     for c in chans:
         data = delta_encode(c)
@@ -161,6 +171,7 @@ class ImportOptions:
     max_bytes   cut the result to at most this many bytes per track; None for no limit
     truncate    when the result still exceeds the DPCM size cap, cut it to fit instead of failing
     fit         the convert() loudness fit (cleaner, quieter)
+    gain_db     level change in dB after normalising (0 = none); a boost past full scale clips, and the report says so
     """
     rate: object = 12
     channel: str = "mix"
@@ -171,6 +182,7 @@ class ImportOptions:
     max_bytes: object = None
     truncate: bool = False
     fit: bool = False
+    gain_db: float = 0.0
 
 
 CHANNELS = ("mix", "left", "right", "stereo")
@@ -263,13 +275,92 @@ def prepare(x, src_rate, opts=None):
     return x, rate, stereo, notes
 
 
-def convert_wav(x, src_rate, opts=None, name=""):
-    """Float samples -> (Sample, notes) under ImportOptions.  Same as convert() with the default options."""
+def convert_wav(x, src_rate, opts=None, name="", stats=None):
+    """Float samples -> (Sample, notes) under ImportOptions.  Same as convert() with the default options.
+    `stats` (a dict) is filled as in convert()."""
     o = opts or ImportOptions()
     x, rate, stereo, notes = prepare(x, src_rate, o)
     s = convert(x, src_rate, rate, name, stereo, normalise=o.normalize, fit=o.fit,
-                max_bytes=size_limit(rate, o.max_bytes))
+                max_bytes=size_limit(rate, o.max_bytes), gain=10.0 ** (o.gain_db / 20.0), stats=stats)
+    if o.gain_db:
+        notes.append("gain %+g dB" % o.gain_db)
     return s, notes
+
+
+def rate_note(rate):
+    """One line on what a DPCM rate index means for quality and size (the DAC plays the same table)."""
+    hz = DPCM_RATES[rate]
+    kind = ("low: dull and noisy, but small" if rate < 5 else
+            "middle: fine for drums and effects" if rate < 11 else
+            "high: brighter and bigger")
+    return "%d = %d Hz, %d bytes per second; %s" % (rate, round(hz), round(hz / 8), kind)
+
+
+def parse_rate(text):
+    """A DPCM rate from text: an index 0-15, a Hz value from the table (8363 or 8363.42), or "auto" (returns "auto")."""
+    t = str(text).strip().lower()
+    if t == "auto":
+        return "auto"
+    try:
+        v = float(t)
+    except ValueError:
+        raise DpcmError("rate is an index 0-15, a Hz value from the table, or auto")
+    if v == int(v) and 0 <= v <= 15:
+        return int(v)
+    for i, hz in enumerate(DPCM_RATES):
+        if abs(hz - v) < 1.0:
+            return i
+    raise DpcmError("%g Hz is not a DAC rate; the rates are %s Hz" % (v, ", ".join("%d" % round(h) for h in DPCM_RATES)))
+
+
+def add_import_arguments(p, fit_default=False):
+    """The WAV import flags, shared by `python -m chipsynth.dpcm convert` and `python -m chipsynth import`."""
+    import argparse
+    p.add_argument("--rate", default="12", metavar="R",
+                   help="DAC rate: index 0-15, its Hz (%s) or auto for the highest that fits (default 12); higher is "
+                        "brighter and bigger" % ", ".join("%d" % round(h) for h in DPCM_RATES))
+    p.add_argument("--channel", choices=CHANNELS, help="stereo WAV: mix (default), left, right, or stereo (two tracks)")
+    p.add_argument("--stereo", action="store_true", help="same as --channel stereo")
+    p.add_argument("--no-normalize", action="store_true", help="keep the WAV's own level (default: peak to 0.98)")
+    p.add_argument("--gain", type=float, default=0.0, metavar="DB", help="change the level by DB after normalizing (default 0)")
+    p.add_argument("--trim", type=float, nargs="?", const=-48.0, metavar="DB",
+                   help="trim leading/trailing silence below DB dBFS (default -48)")
+    p.add_argument("--fade", type=float, default=0.0, metavar="MS", help="fade-out over the last MS milliseconds")
+    p.add_argument("--max-seconds", type=float, metavar="S", help="cut the recording to S seconds")
+    p.add_argument("--max-bytes", type=int, metavar="N", help="cut the result to N bytes per track")
+    p.add_argument("--truncate", action="store_true", help="cut a too-long result to the DPCM size cap, not fail")
+    p.add_argument("--fit", action=argparse.BooleanOptionalAction, default=fit_default,
+                   help="turn the level down until it follows cleanly (default: %s)" % ("on" if fit_default else "off"))
+
+
+def options_from_args(a):
+    """ImportOptions from the namespace add_import_arguments filled."""
+    return ImportOptions(rate=parse_rate(a.rate), channel=a.channel or ("stereo" if a.stereo else "mix"),
+                         normalize=not a.no_normalize, trim_db=a.trim, fade_ms=a.fade, max_seconds=a.max_seconds,
+                         max_bytes=a.max_bytes, truncate=a.truncate, fit=a.fit, gain_db=a.gain)
+
+
+def sample_name(path):
+    """The sample name for a WAV file: its stem without anything but letters and underscores."""
+    import re
+    return re.sub(r"[^A-Za-z_]", "_", Path(path).stem) or "sample"
+
+
+def report_lines(s, wav_rate, wav_seconds, stats, notes=()):
+    """The Report for an import: rate, length, bytes, clipping, and what the options did."""
+    lines = ["from: %d Hz, %.2f s" % (wav_rate, wav_seconds),
+             "rate: " + rate_note(s.rate),
+             "length: %.2f s, %d part(s)%s" % (s.seconds, len(s.tracks[0]), ", 2 tracks" if s.stereo else ""),
+             "bytes: %d" % s.size]
+    clipped = (stats or {}).get("clipped", 0)
+    if clipped:
+        frames = max(1, stats.get("frames", 1))
+        lines.append("warning: clipping: %d of %d samples are past full scale (%.1f%%); lower the gain or normalize"
+                     % (clipped, frames * (2 if s.stereo else 1), 100.0 * clipped / (frames * (2 if s.stereo else 1))))
+    else:
+        lines.append("clipping: none (peak %.0f%% of full scale)" % (100.0 * (stats or {}).get("peak", 0.0)))
+    lines += ["did: " + n for n in notes]
+    return lines
 
 
 def preview(x, src_rate, opts=None, name=""):
@@ -392,17 +483,7 @@ def main(argv=None):
     c.add_argument("wav")
     c.add_argument("gamedir")
     c.add_argument("--name")
-    c.add_argument("--rate", default="12", help="DPCM rate 0-15 (default 12), or auto for the highest that fits")
-    c.add_argument("--stereo", action="store_true", help="keep left and right as two tracks (same as --channel stereo)")
-    c.add_argument("--channel", choices=CHANNELS, help="mix (default), left, right or stereo")
-    c.add_argument("--no-normalize", action="store_true", help="keep the WAV's own level")
-    c.add_argument("--trim", type=float, nargs="?", const=-48.0, metavar="DB",
-                   help="trim leading/trailing silence below DB dBFS (default -48)")
-    c.add_argument("--fade", type=float, default=0.0, metavar="MS", help="fade-out over the last MS milliseconds")
-    c.add_argument("--max-seconds", type=float, metavar="S", help="cut the recording to S seconds")
-    c.add_argument("--max-bytes", type=int, metavar="N", help="cut the result to N bytes per track")
-    c.add_argument("--truncate", action="store_true", help="cut a too-long result to the DPCM size cap, not fail")
-    c.add_argument("--fit", action="store_true", help="turn it down until it follows cleanly")
+    add_import_arguments(c)
     c.add_argument("--preview", action="store_true", help="show size, duration and rate; write nothing")
     a = ap.parse_args(argv)
     root = Path(a.gamedir)
@@ -412,13 +493,7 @@ def main(argv=None):
         return 0
     rate, x = read_wav(a.wav)
     name = a.name or "".join(ch for ch in Path(a.wav).stem if ch.isalpha() or ch == "_") or "sample"
-    try:
-        r = "auto" if a.rate == "auto" else int(a.rate)
-    except ValueError:
-        raise DpcmError("rate is 0 to 15, or auto")
-    opts = ImportOptions(rate=r, channel=a.channel or ("stereo" if a.stereo else "mix"), normalize=not a.no_normalize,
-                         trim_db=a.trim, fade_ms=a.fade, max_seconds=a.max_seconds, max_bytes=a.max_bytes,
-                         truncate=a.truncate, fit=a.fit)
+    opts = options_from_args(a)
     if a.preview:
         info = preview(x, rate, opts, name)
         print(format_preview(info, rate, len(x) / rate))

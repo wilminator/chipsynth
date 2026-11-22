@@ -58,12 +58,25 @@ mono, normalized to 0.98). Options, applied in this order (channel, trim, cut to
 | `--fade MS` | linear fade-out over the last MS milliseconds |
 | `--max-seconds S`, `--max-bytes N` | cut the recording to S seconds, or the result to N bytes per track |
 | `--truncate` | a result over the DPCM size cap (64 parts of 4081 bytes) is cut to fit instead of refused |
-| `--fit` | turn the level down until it follows cleanly (cleaner, quieter) |
+| `--gain DB` | change the level by DB dB after normalizing (default 0); a boost past full scale clips, and the report says so |
+| `--fit` / `--no-fit` | turn the level down until it follows cleanly (cleaner, quieter); off here, on for `import` and the composer |
 | `--preview` | print the size, duration, chosen rate and parts, and write nothing |
 
     python -m chipsynth.dpcm convert in.wav GAMEDIR --rate auto --channel left --trim --fade 50 --preview
 
-In Python: `dpcm.convert_wav(x, wav_rate, dpcm.ImportOptions(...))` returns `(Sample, notes)`, and `dpcm.preview(...)` returns
+`--rate` also takes the Hz of a table rate (`8363`). The DAC plays only the 16 NES DPCM rates (4182 to 33144 Hz): a higher
+rate is brighter and bigger (rate 15 is about 4.1 KB a second, rate 0 about 0.5 KB), a low one is dull and noisy but suits
+kicks and bass.
+
+The same options come in two more places, with the same defaults (rate 12, channels mixed, normalized, level fitted):
+
+    python -m chipsynth import music/forest.csp kick.wav --id kick --rate 7 --channel left --trim --gain -3
+
+adds the WAV to the package as a sample, and File > Import > WAV (or dropping a `.wav` on the composer) opens an options
+dialog with the same choices. Either one reports the rate, length, bytes and clipping (the status line, and Last report).
+
+In Python: `dpcm.convert_wav(x, wav_rate, dpcm.ImportOptions(...), name, stats)` returns `(Sample, notes)` (`stats` is
+filled with peak, clipped and frames; `dpcm.report_lines` words it), and `dpcm.preview(...)` returns
 the size, seconds, rate, parts and any error without writing. The maker's Sample import settings screen has the same
 options and shows that preview live.
 
@@ -83,6 +96,12 @@ The centre of the window has three views (Tab or the buttons at the top switch):
 of the same height, one below the other, scrolling up and down (the track height is a setting: Ctrl+Shift+wheel or the
 **T** buttons, remembered between sessions); **Piano roll** is one large piano roll for all the voices; **Tracker** is
 the grid with time running down the page.
+
+In the tracker each note shows its volume (`v10`) beside its name; a note with the volume most of its voice's notes have
+is drawn dim, so the notes that differ stand out. With the cursor on a note, `,` / `.` lower / raise its volume (Shift: by
+4), or press `/` and type the volume: one digit (0, 2-9) sets it at once, `1` waits for a second digit (10-15) or Enter,
+Backspace edits and Esc cancels. Each change is one undo step, and it is written to the song as a `v` command, so it
+survives MML export and import.
 
 ### The File menu
 

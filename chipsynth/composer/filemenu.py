@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pygame
 
-from chipsynth import exporter, mml, package as pk
+from chipsynth import dpcm, exporter, mml, package as pk
 from chipsynth.package import PackageError
 from chipsynth.song import Song, SongError
-from chipsynth.synth import RATE
+from chipsynth.synth import DPCM_RATES, RATE
 
 from . import fileops as fo
 from .files import backup_file, save_with_backup
@@ -222,6 +222,8 @@ class FileMenu:
         if kind is None:
             self.say("Can't tell what %s is: import takes .mml, .mid, .txt (FamiStudio), .sng (GoatTracker) or .wav." % Path(path).name, 8.0)
             return False
+        if kind == "wav":
+            return self.import_wav_options(path)
         if kind not in ("famistudio", "goattracker"):
             return self.import_file(path, kind)
         try:
@@ -250,6 +252,31 @@ class FileMenu:
             note = ("The file does not record its region or multispeed. " + note).strip()
         self.show_options("Import %s" % Path(path).name, rows, ok="Import", note=note, apply=lambda v: self.import_file(
             path, kind, region=v["region"], multispeed=v.get("multispeed", 1), song=v["song"] or None))
+        return True
+
+    def import_wav_options(self, path):
+        """Import > WAV: the options dialog (channel, DAC rate, trim, normalize, gain, level fit), then import_wav.
+        The first choice of every row is what a plain import does (rate 12, mixed, normalized, level fitted)."""
+        path = Path(path)
+        if self.ed is None:
+            self.say("Open or start a song first: a sample belongs to a song.", 6.0)
+            return False
+        rates = [(i, "%d: %d Hz, %d B/s" % (i, round(hz), round(hz / 8))) for i, hz in enumerate(DPCM_RATES)]
+        rates = [("auto", "Auto: the highest that fits")] + rates
+        rows = [("rate", "DAC rate", rates, 1 + 12),
+                ("channel", "Stereo", [("mix", "Mix to mono"), ("left", "Left only"), ("right", "Right only")], 0),
+                ("trim", "Trim silence", [(None, "Off")] + [(db, "Below %d dB" % db) for db in (-60, -48, -36, -24)], 0),
+                ("normalize", "Normalize", [(True, "On (peak to 98%)"), (False, "Off (keep the WAV's level)")], 0),
+                ("gain", "Gain", [(g, "%+d dB" % g if g else "0 dB") for g in (0, 3, 6, 12, -3, -6, -12)], 0),
+                ("fit", "Level fit", [(True, "On (quieter, cleaner)"), (False, "Off")], 0)]
+        note = ("The DAC plays these 16 rates only. Higher rates are brighter and bigger (a rate 15 second is 4.2 KB, rate 0 "
+                "is 0.5 KB); low rates sound dull and noisy but suit bass and kicks. A boost can clip: the report says.")
+
+        def go(v):
+            opts = dpcm.ImportOptions(rate=v["rate"], channel=v["channel"], normalize=v["normalize"], trim_db=v["trim"],
+                                      gain_db=float(v["gain"]), fit=v["fit"])
+            return self.import_wav(path, options=opts)
+        self.show_options("Import %s" % path.name, rows, ok="Import", note=note, apply=go)
         return True
 
     def package_path(self):
