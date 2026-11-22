@@ -39,10 +39,50 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `components.py`, `exporter.py`, `__main__.py` | the command line (below): list / filter / export / import components, export a song as wav, mid, mml or csp |
 | `player.py` | `TunePlayer`: schedules a `Tune` on the synth, loops, tails ring over the restart |
 | `output.py` | `MusicOut`: live playback through pygame (the only place pygame is used) |
-| `musicgen.py` | a seeded tune generator (`generate(kind, seed, mood, tempo)` returns MML text) |
+| `musicgen.py` | a seeded tune generator (`generate(kind, seed, mood, tempo)` returns MML text; options below) |
 
 The tune language is described in `DESIGN-MUSIC.md` (project root) and, shorter, on the Music editor's help pages.
 Rendering is exact: the same samples come out however the output is cut into blocks.
+
+## The generator and its options
+
+`generate(kind, seed, mood, tempo)` returns a finished tune as MML text; the same arguments always give the same text. Kinds:
+`title`, `victory`, `gameover`, `fight`, `boss`, `world`, `maze`, `town`. Moods: `calm`, `tense`, `bright`, `dark`.
+
+    python -m chipsynth generate boss --seed 7 --mood dark -o boss.mml
+
+Everything past the four arguments is an **option**. Options are off by default and, with all of them off, the text is exactly
+what the generator has always written (a test pins it), so a game with fixed seeds keeps its music. An option never moves a
+note: it adds words to the same notes. Each one is a word in the composer's New dialog (toggle buttons, or typed after the
+kind with `new_from_generator`), a command-line flag and a keyword of `generate`.
+
+| word | flag | `generate(...)` | adds |
+|---|---|---|---|
+| `dac` | `--dac` | `dac=True` | the drums as samples on D1 / D2 (kick, snare, hats, crash, toms) instead of the noise voice |
+| `dac-bass` | `--dac-bass` | `dac_bass=True` | the bass as pitched samples on D2 |
+| `voice` | `--voice` | `voice=True` | a rare one-shot "hey" on D1 (boss intro, turnarounds, a jingle's end) |
+| `echo` | `--echo` | `fx="echo"` | a header `echo` whose delay is a beat fraction of the song's tempo (a dotted eighth in a town, an eighth in a fight, a full beat in a maze), ping-pong (`wide`) in the roomy kinds; the bass is sent (nearly) dry and the arpeggio sits behind the lead |
+| `reverb` | `--reverb` | `fx="reverb"` | a header `reverb` sized by kind (small in a fight, large in a maze or a game over), same sends |
+| `filter` | `--filter` | `fx="filter"` | a low-pass on the voices that suit the kind: a swept (`fsweep`) resonant filter on a boss's buzz lead, a gently opening one on a fight lead, a world or title arpeggio, a breathing filter on the maze and game-over pads (which become saws so there is something to filter). Not on a victory jingle (too short) |
+| `vibrato` | `--vibrato` | `fx="vibrato"` | `vib` on the lead's held notes (a quarter note or longer) and `vib off` on the short ones; faster for tense, gentler for calm |
+| `slide` | `--slide` | `fx="slide"` | `slide` into some leaps of the lead, and into the octave jumps of a fight or boss bass, only between notes that touch; a game over wails (most notes slide) |
+| `sweep` | `--sweep` | `fx="sweep"` | `pws` on a pulse arpeggio, a pulse lead (not a flute or a saw) or a pad (which becomes a pulse pad) |
+| `fx` | `--fx` | `fx="all"` | all six effect words at once |
+| `degrees` | `--degrees` | `degrees=True` | the lead, arpeggio and bass written as scale degrees under a `key` line (`key c# minor`, `o4 1:4 3 5`); change the key line to transpose the song |
+
+`fx` takes a word, a list of words or a string (`"echo,filter"`). A word a kind has nothing for adds nothing, and is not
+recorded: `generate("victory", 2, fx="filter")` is the plain victory tune. When echo, reverb or a filter is on the melodic
+voices are turned down one to three volume steps to leave room for what they add. The first line of a generated tune records
+what was written (`fx=echo+filter+degrees`), `musicgen.fx_options(text)` reads it back as `(effects, degrees)`, and the
+composer's regenerate-warning (`is_edited`) covers it.
+
+    python -m chipsynth generate town --seed 5 --mood calm --echo --reverb --degrees
+    python -m chipsynth generate boss --seed 7 --fx --dac -o boss.mml
+
+The WAV, MIDI, MML and package writers handle all of it. The FamiStudio exporter has no echo, reverb, filter, vibrato,
+slide or pulse sweep to write, and its report says so ("left out: echo and reverb", "slide into a note", "instrument
+'Inst2': vibrato, filter, filter sweep"); equal instruments are written once, so a tune whose vibrato switches on and off
+does not turn into dozens of identical FamiStudio instruments. There is no GoatTracker exporter yet.
 
 ## WAV import options (`dpcm.py`)
 

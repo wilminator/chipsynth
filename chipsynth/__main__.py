@@ -36,6 +36,10 @@
                                     --dac         drums as samples on D1 / D2          (kick, snare, hats, crash, toms)
                                     --dac-bass    the bass as pitched samples on D2
                                     --voice       a rare one-shot "hey" on D1 (boss intro, turnarounds)
+                                    --echo --reverb --filter --vibrato --slide --sweep   the engine's effects, set per kind and
+                                                  mood (tempo-synced echo, a room, a filter, lead vibrato, portamento, pulse sweeps)
+                                    --fx          all six effects at once
+                                    --degrees     write the notes as scale degrees under a `key` line
                                     --samples DIR also write the kit's .dpcm files the tune uses into DIR
                                                   (a game's music/samples; the built-in kit needs no files)
                                     --wav FILE    also render the tune to a WAV
@@ -63,10 +67,11 @@ def generate_cmd(args):
     from . import kit, musicgen
     out, samples, wav = opt(args, "-o"), opt(args, "--samples"), opt(args, "--wav")
     seed, mood, tempo = opt(args, "--seed"), opt(args, "--mood"), opt(args, "--tempo")
-    flags = {f: f in args for f in ("--dac", "--dac-bass", "--voice")}
-    args = [a for a in args if a not in flags]
+    flags = {f: f in args for f in ("--dac", "--dac-bass", "--voice", "--degrees", "--fx")}
+    fxs = [w for w in musicgen.FX_WORDS if "--" + w in args]
+    args = [a for a in args if a not in flags and not (a.startswith("--") and a[2:] in musicgen.FX_WORDS)]
     if len(args) != 1 or args[0] not in musicgen.KINDS or (mood or "") not in musicgen.MOODS:
-        print("generate KIND [--seed N] [--mood M] [--tempo BPM] [--dac] [--dac-bass] [--voice] [-o FILE] [--samples DIR] "
+        print("generate KIND [--seed N] [--mood M] [--tempo BPM] [--dac] [--dac-bass] [--voice]\n  [--echo] [--reverb] [--filter] [--vibrato] [--slide] [--sweep] [--fx] [--degrees] [-o FILE] [--samples DIR] "
               "[--wav FILE]\n  kinds: %s\n  moods: %s" % (", ".join(musicgen.KINDS), ", ".join(m for m in musicgen.MOODS if m)),
               file=sys.stderr)
         return 2
@@ -76,7 +81,8 @@ def generate_cmd(args):
         print("error: --seed and --tempo are numbers", file=sys.stderr)
         return 2
     text = musicgen.generate(args[0], seed, mood or "", tempo, dac=flags["--dac"], dac_bass=flags["--dac-bass"],
-                             voice=flags["--voice"])
+                             voice=flags["--voice"], fx=musicgen.FX_WORDS if flags["--fx"] else fxs,
+                             degrees=flags["--degrees"])
     if out:
         Path(out).write_text(text, encoding="utf-8", newline="\n")
         print("wrote", out)

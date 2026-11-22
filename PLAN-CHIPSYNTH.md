@@ -223,9 +223,11 @@ Not in C2 (later): multi-select, copy / paste, quantize (C7); the toolbar hides 
 2. Part A step 4 (imports) and the README quick start, one zip.
 3. C0 (Song model, compiler, MML import / export), then C0b (the package format, `PackageSet`, game wiring), then C1 on.
    Confirming depth with you before each milestone (your credits rule).
-4. Still open from earlier and slotted in when you say: generator use of effects / degrees / echo / filter, the remaining SID importers
+4. Still open from earlier and slotted in when you say: the remaining SID importers
    (SID-Wizard, SID Factory II, Furnace; the FamiStudio text and GoatTracker importers are built), packaging for PyPI.
 
 COMPOSER C8 (2026-10-15) DONE: make pattern from selection (P; Editor.make_pattern checks the sound is unchanged), loop just the selection (Shift+Space; model.tune_range), New from generator (Ctrl+N / New button; asks "kind [seed] [mood]"). NEXT (backlog): tracker volume column, key / per-note effects from the roll, WAV import options, MIDI drums onto D1/D2.
 
 COMPOSER FILE MENU (2026-10-30) DONE (PR #21): New, Open, Save, Import and Export in one menu, the unsaved-edits dialog, "Last report..." (chipsynth/composer/filemenu.py; PLAN-FORMATS.md section 9). NEXT (backlog): as the C8 line above.
+
+GENERATOR EFFECTS (2026-11-22) DONE (branch generator-effects): opt-in words `echo reverb filter vibrato slide sweep` (`fx`) and `degrees` for `generate`, the CLI and the composer's New dialog; see README 'The generator and its options' and DESIGN-MUSIC 'Generator effect options'. NEXT: a game's music.toml reader passes `fx` / `degrees` through; a GoatTracker writer would need to report them as dropped.
