@@ -1,6 +1,8 @@
 # Copyright (C) 2026 Michael Allen Wilmes
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Writing FamiStudio text.  The reader (formats/famistudio_text.py) is the check: what is written must read back."""
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -140,76 +142,24 @@ class VersionPolicyTests(unittest.TestCase):
     def first_line(self, text):
         return text.splitlines()[0]
 
-    def test_the_default_is_one_constant(self):
-        self.assertEqual(ex.DEFAULT_VERSION, "4.5.3")
+    def test_no_version_is_written_and_the_reader_still_reads_it(self):
         rc, text = self.export()
-        self.assertIn('Version="%s"' % ex.DEFAULT_VERSION, self.first_line(text))
-
-    def test_none_leaves_the_attribute_out_and_the_reader_still_reads_it(self):
-        out, rep = ex.dump(Song.from_mml(MML).compile(), version=None)
+        self.assertEqual(rc, 0)
+        self.assertTrue(text.startswith("Project TempoMode"))
+        out, rep = ex.dump(Song.from_mml(MML).compile())
         self.assertNotIn("Version", out.splitlines()[0])
-        self.assertTrue(out.startswith("Project TempoMode"))
-        self.assertTrue(any("no Version" in n for n in rep.notes))
-        a, b, *_ = round_trip(version=None)
+        self.assertTrue(any("no Version" in n and "upgrade FamiStudio" in n for n in rep.notes))
+        a, b, *_ = round_trip()
         self.assertEqual(notes(a, 0), notes(b, 0))
         self.assertFalse(any("written by FamiStudio" in n for n in fam.load(out).report.notes))
 
-    def test_cli_none_in_any_case(self):
-        for word in ("none", "None"):
-            rc, text = self.export("--fs-version", word)
-            self.assertEqual(rc, 0)
-            self.assertNotIn("Version", self.first_line(text))
-
-    def test_a_typed_version_is_written_as_given(self):
-        rc, text = self.export("--fs-version", "4.2.0")
-        self.assertIn('Version="4.2.0"', self.first_line(text))
-
-    def test_reference_copies_the_exact_version_string(self):
-        ref = self.tmp / "mine.txt"
-        ref.write_text('\ufeffProject Version="4.2.0b3" TempoMode="FamiStudio" Name="x"\n\tSong Name="x"\n', encoding="utf-8")
-        rc, text = self.export("--fs-reference", str(ref))
-        self.assertEqual(rc, 0)
-        self.assertIn('Version="4.2.0b3"', self.first_line(text))
-        self.assertEqual(len(fam.load(text).songs), 1)
-
-    def test_reference_wins_over_a_typed_version(self):
-        ref = self.tmp / "mine.txt"
-        ref.write_text('Project Version="4.2.0" TempoMode="FamiStudio"\n', encoding="utf-8")
-        rc, text = self.export("--fs-version", "9.9.9", "--fs-reference", str(ref))
-        self.assertIn('Version="4.2.0"', self.first_line(text))
-
-    def test_reference_without_a_version_writes_none_and_says_so(self):
-        ref = self.tmp / "bare.txt"
-        ref.write_text('Project TempoMode="FamiStudio"\n', encoding="utf-8")
-        from chipsynth import exporter
-        pkg = pk.load(self.tmp / "t.csp")
-        r = exporter.export_song(pkg, "tune", self.tmp / "o.txt", fmt="famistudio", fs_reference=ref)
-        self.assertNotIn("Version", (self.tmp / "o.txt").read_text().splitlines()[0])
-        self.assertTrue(any("has no Version" in n for n in r.notes), r.notes)
-
-    def test_a_reference_that_is_not_famistudio_text_is_refused(self):
-        bad = self.tmp / "bad.txt"
-        bad.write_text("hello\nProject Version=\"4.2.0\"\n", encoding="utf-8")
-        from chipsynth import exporter
-        pkg = pk.load(self.tmp / "t.csp")
-        with self.assertRaisesRegex(exporter.ExportError, "not a FamiStudio text file"):
-            exporter.export_song(pkg, "tune", self.tmp / "o.txt", fmt="famistudio", fs_reference=bad)
-        self.assertFalse((self.tmp / "o.txt").exists())
-        self.assertEqual(self.export("--fs-reference", str(bad))[0], 1)
-        self.assertEqual(self.export("--fs-reference", str(self.tmp / "missing.txt"))[0], 1)
-
-    def test_report_says_which_stamp_and_why_another_may_be_needed(self):
-        _, rep = ex.dump(Song.from_mml(MML).compile(), version="4.5.3")
-        text = " ".join(rep.notes)
-        self.assertIn('Version="4.5.3"', text)
-        self.assertIn("reference file", text)
-
-    def test_a_file_stamped_with_a_reference_round_trips(self):
-        ref = self.tmp / "mine.txt"
-        ref.write_text('Project Version="4.2.0" TempoMode="FamiStudio"\n', encoding="utf-8")
-        rc, text = self.export("--fs-reference", str(ref), "--region", "pal")
-        back = fam.load(text)
-        self.assertTrue(any("written by FamiStudio 4.2.0" in n for n in back.report.notes))
+    def test_the_version_options_are_gone(self):
+        for opt in ("--fs-version", "--fs-reference"):
+            with self.assertRaises(SystemExit):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.export(opt, "4.2.0")
+        self.assertFalse(hasattr(ex, "DEFAULT_VERSION"))
+        self.assertFalse(hasattr(ex, "reference_version"))
 
 
 if __name__ == "__main__":

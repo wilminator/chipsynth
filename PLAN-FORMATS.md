@@ -283,14 +283,12 @@ at their average), per-pattern tempo settings, looping DPCM, volume changes in t
 shift rate: the top periods are above what chipsynth can play.
 
 **FamiStudio text export: built** (PR #19). `chipsynth/formats/famistudio_export.py`, with the reader as its check (what is written must read back; `tests/test_famistudio_export.py`).
-`python -m chipsynth export-song SOURCE[:SONG] -o OUT.txt [--region ntsc|pal] [--fs-version X.Y.Z|none] [--fs-reference FILE]` (default 4.5.3, NTSC; see the version policy below), and the composer's File > Export > FamiStudio text.
-V1, V2 -> Square 1, 2; V3 -> Triangle; V4 -> Noise; D1 -> DPCM. The volume ADSR and the arpeggio are sampled at the frame rate into FamiStudio envelopes. The file says it was
-written by FamiStudio `--fs-version`, because FamiStudio only reads files whose version starts like its own.
-**Version policy** (branch `fs-version-policy`): the author's FamiStudio 4.2.0 refused files stamped 4.5.3 and 4.2.0 alike, and newer FamiStudio source skips the check when `Version` is absent
-and otherwise compares only the first three characters. So nothing is hard-coded: `DEFAULT_VERSION` (famistudio_export.py) is the one default; `--fs-version none` omits the attribute;
-`--fs-reference FILE` copies the exact Version string from the first line of a file the author's FamiStudio exported (no Version: none is written and the report says so; not FamiStudio text: refused);
-the composer dialog offers default, Reference file..., a typed version and None, and remembers the choice in its settings (`fs_stamp`, `fs_typed`, `fs_ref`). The report names the stamp and why another may be needed.
-The importer reads files with or without a Version. **Not verified** against a real FamiStudio 4.2.0. Dropped, and said so in the Report: more than four voices and any DAC
+`python -m chipsynth export-song SOURCE[:SONG] -o OUT.txt [--region ntsc|pal]` (NTSC by default), and the composer's File > Export > FamiStudio text.
+V1, V2 -> Square 1, 2; V3 -> Triangle; V4 -> Noise; D1 -> DPCM. The volume ADSR and the arpeggio are sampled at the frame rate into FamiStudio envelopes.
+**Version policy (decided 2026-11-22):** no `Version` attribute is written, ever. FamiStudio's text format only loads in the release that wrote it, and the versions keep marching; newer
+FamiStudio source skips the check when `Version` is absent, and the author confirmed that his upgraded FamiStudio opens such files (round-3 test set, 16 songs, NTSC and PAL). A release that still
+demands a version (4.2.0 refused both a 4.5.3 and a 4.2.0 stamp) needs upgrading: the report says so. The earlier `--fs-version`, `--fs-reference`, the composer's Version row and its settings
+(`fs_stamp`, `fs_typed`, `fs_ref`) were removed; the code is kept in `legacy/famistudio_version.py`. The importer reads files with or without a Version. **Not verified** against a real FamiStudio 4.2.0. Dropped, and said so in the Report: more than four voices and any DAC
 beyond D1, echo, reverb, the filter, vibrato, slide, pan, pulse-width sweeps and tempo changes. **Not verified:** the files have been read back by chipsynth's own importer only,
 not opened in a real FamiStudio (a test set of generated songs, NTSC and PAL, was made for the author to check by eye and ear).
 

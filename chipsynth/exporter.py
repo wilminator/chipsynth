@@ -23,7 +23,6 @@ import numpy as np
 
 from . import components, midi, mml, package as pk
 from .formats import famistudio_export
-from .formats.famistudio_text import FamiStudioError
 from .player import TunePlayer
 from .song import Song
 from .synth import RATE, to_pcm16
@@ -33,9 +32,6 @@ SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp":
 
 
 FAMITRACKER_ENDING = ".ftm.txt"                  # a plain .txt is FamiStudio's own text format: this one is FamiTracker's
-
-DEFAULT_FS_VERSION = famistudio_export.DEFAULT_VERSION
-
 
 class ExportError(Exception):
     pass
@@ -222,30 +218,8 @@ def format_of(path, fmt=None):
     return f
 
 
-def fs_stamp(version=DEFAULT_FS_VERSION, reference=None):
-    """(the Version to write or None, a Report line about where it came from or None).  `version` may be the word "none";
-    a `reference` file wins over `version`.  Raises ExportError when the reference cannot be read or is not FamiStudio text."""
-    if reference:
-        try:
-            text = Path(reference).read_text(encoding="utf-8", errors="replace")
-            got = famistudio_export.reference_version(text)
-        except OSError as e:
-            raise ExportError("can't read the reference file %s: %s" % (reference, e.strerror or e))
-        except FamiStudioError as e:
-            raise ExportError("%s: %s" % (reference, e))
-        if got is None:
-            return None, "the reference file %s has no Version attribute, so none is written" % Path(reference).name
-        return got, 'Version "%s" copied from the reference file %s' % (got, Path(reference).name)
-    if version is None or str(version).strip().lower() in ("none", ""):
-        return None, None
-    return str(version).strip(), None
-
-
-def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region=None, fs_version=DEFAULT_FS_VERSION, fs_reference=None,
-                multispeed=1, gt_tempo="exact"):
+def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region=None, multispeed=1, gt_tempo="exact"):
     """Write song `song_id` of `pkg` to `path` as wav, mid, mml, csp, famistudio, famitracker or goattracker (see the module doc).  Returns a Result.
-    FamiStudio: `fs_version` is the Version stamp (None or "none": leave it out); `fs_reference` is a text file the
-    author's own FamiStudio wrote, whose exact Version is used instead (see fs_stamp).
     `region` is ntsc or pal for the two tracker formats (default: ntsc for FamiStudio, pal for GoatTracker, as its importer);
     `multispeed` (1, 2, 4) and `gt_tempo` (exact or speed) are GoatTracker's."""
     opts = opts or AudioOptions()
@@ -268,12 +242,11 @@ def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region=None, 
             r.notes += midi.drum_hits(tune)[1]
             r.written = [path]
         elif fmt == "famistudio":
-            fs_version, why = fs_stamp(fs_version, fs_reference)
-            text, rep = famistudio_export.dump(pkg.tune(song_id, lib), region, fs_version, name=song_id if not pkg.songs[song_id].title else None)
+            text, rep = famistudio_export.dump(pkg.tune(song_id, lib), region, name=song_id if not pkg.songs[song_id].title else None)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8", newline="\n")
             r.written = [path]
-            r.notes += ([why] if why else []) + rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
+            r.notes += rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
         elif fmt == "goattracker":
             from .formats import goattracker_export
             try:
