@@ -31,7 +31,7 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `mml.py` | the tune language: parser, `Tune`, `Note`, the instrument / pattern / effect / scale / sample library |
 | `synth.py`, `synthfx.py` | the voices, envelopes, effects, filter; the shared echo and reverb bus |
 | `dpcm.py` | WAV to NES-style delta samples, the `.dpcm` file format (`python -m chipsynth.dpcm demo|convert`) |
-| `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report; `formats.goattracker.load(bytes)` likewise |
+| `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report; `formats.goattracker.load(bytes)` and `formats.sf2.load(bytes)` and `formats.sidwizard.load(bytes)` likewise; the writers are `formats.famistudio_export.dump(tune)` and `formats.goattracker_export.dump(tune)` -> file, report |
 | `midi.py` | Standard MIDI files: `to_midi(tune)`, `from_midi(bytes, voices=None, drum_lanes="auto")` -> Song (a voice per part, up to 16; `voices=N` folds the rest into gaps; channel 10 drums go to D1 / D2, and to D3-D8 when hits fall together) |
 | `songedit.py` | `Editor`: note-level edits of a Song (add, erase, pitch, resize, move) with undo / redo |
 | `song.py`, `songmml.py` | the `Song` model (clips, repeats, calls kept as objects), `Song.compile()` to a `Tune`, MML import / export: `Song.from_mml(text)`, `song.to_mml()` |
@@ -39,10 +39,50 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `components.py`, `exporter.py`, `__main__.py` | the command line (below): list / filter / export / import components, export a song as wav, mid, mml or csp |
 | `player.py` | `TunePlayer`: schedules a `Tune` on the synth, loops, tails ring over the restart |
 | `output.py` | `MusicOut`: live playback through pygame (the only place pygame is used) |
-| `musicgen.py` | a seeded tune generator (`generate(kind, seed, mood, tempo)` returns MML text) |
+| `musicgen.py` | a seeded tune generator (`generate(kind, seed, mood, tempo)` returns MML text; options below) |
 
 The tune language is described in `DESIGN-MUSIC.md` (project root) and, shorter, on the Music editor's help pages.
 Rendering is exact: the same samples come out however the output is cut into blocks.
+
+## The generator and its options
+
+`generate(kind, seed, mood, tempo)` returns a finished tune as MML text; the same arguments always give the same text. Kinds:
+`title`, `victory`, `gameover`, `fight`, `boss`, `world`, `maze`, `town`. Moods: `calm`, `tense`, `bright`, `dark`.
+
+    python -m chipsynth generate boss --seed 7 --mood dark -o boss.mml
+
+Everything past the four arguments is an **option**. Options are off by default and, with all of them off, the text is exactly
+what the generator has always written (a test pins it), so a game with fixed seeds keeps its music. An option never moves a
+note: it adds words to the same notes. Each one is a word in the composer's New dialog (toggle buttons, or typed after the
+kind with `new_from_generator`), a command-line flag and a keyword of `generate`.
+
+| word | flag | `generate(...)` | adds |
+|---|---|---|---|
+| `dac` | `--dac` | `dac=True` | the drums as samples on D1 / D2 (kick, snare, hats, crash, toms) instead of the noise voice |
+| `dac-bass` | `--dac-bass` | `dac_bass=True` | the bass as pitched samples on D2 |
+| `voice` | `--voice` | `voice=True` | a rare one-shot "hey" on D1 (boss intro, turnarounds, a jingle's end) |
+| `echo` | `--echo` | `fx="echo"` | a header `echo` whose delay is a beat fraction of the song's tempo (a dotted eighth in a town, an eighth in a fight, a full beat in a maze), ping-pong (`wide`) in the roomy kinds; the bass is sent (nearly) dry and the arpeggio sits behind the lead |
+| `reverb` | `--reverb` | `fx="reverb"` | a header `reverb` sized by kind (small in a fight, large in a maze or a game over), same sends |
+| `filter` | `--filter` | `fx="filter"` | a low-pass on the voices that suit the kind: a swept (`fsweep`) resonant filter on a boss's buzz lead, a gently opening one on a fight lead, a world or title arpeggio, a breathing filter on the maze and game-over pads (which become saws so there is something to filter). Not on a victory jingle (too short) |
+| `vibrato` | `--vibrato` | `fx="vibrato"` | `vib` on the lead's held notes (a quarter note or longer) and `vib off` on the short ones; faster for tense, gentler for calm |
+| `slide` | `--slide` | `fx="slide"` | `slide` into some leaps of the lead, and into the octave jumps of a fight or boss bass, only between notes that touch; a game over wails (most notes slide) |
+| `sweep` | `--sweep` | `fx="sweep"` | `pws` on a pulse arpeggio, a pulse lead (not a flute or a saw) or a pad (which becomes a pulse pad) |
+| `fx` | `--fx` | `fx="all"` | all six effect words at once |
+| `degrees` | `--degrees` | `degrees=True` | the lead, arpeggio and bass written as scale degrees under a `key` line (`key c# minor`, `o4 1:4 3 5`); change the key line to transpose the song |
+
+`fx` takes a word, a list of words or a string (`"echo,filter"`). A word a kind has nothing for adds nothing, and is not
+recorded: `generate("victory", 2, fx="filter")` is the plain victory tune. When echo, reverb or a filter is on the melodic
+voices are turned down one to three volume steps to leave room for what they add. The first line of a generated tune records
+what was written (`fx=echo+filter+degrees`), `musicgen.fx_options(text)` reads it back as `(effects, degrees)`, and the
+composer's regenerate-warning (`is_edited`) covers it.
+
+    python -m chipsynth generate town --seed 5 --mood calm --echo --reverb --degrees
+    python -m chipsynth generate boss --seed 7 --fx --dac -o boss.mml
+
+The WAV, MIDI, MML and package writers handle all of it. The FamiStudio exporter has no echo, reverb, filter, vibrato,
+slide or pulse sweep to write, and its report says so ("left out: echo and reverb", "slide into a note", "instrument
+'Inst2': vibrato, filter, filter sweep"); equal instruments are written once, so a tune whose vibrato switches on and off
+does not turn into dozens of identical FamiStudio instruments. There is no GoatTracker exporter yet.
 
 ## WAV import options (`dpcm.py`)
 
@@ -113,17 +153,17 @@ Enter and Esc work it from the keyboard. The shortcuts keep working with or with
 | New from generator... (Ctrl+N), New blank song | a generated tune, or four empty bars; both open unsaved |
 | Open... (Ctrl+O), Open from packages... | a `.csp` / `.mml` / `.mid` file chooser; the Songs list of the loaded packages |
 | Save (Ctrl+S), Save As... (Ctrl+Shift+S) | as before: `.csp` writes a package, `.mml` text, `.mid` a MIDI export |
-| Import > MML, MIDI, FamiStudio text (.txt), FamiStudio project (.fms), GoatTracker 2 (.sng), WAV sample | the same readers as `python -m chipsynth import` |
-| Export > WAV, MIDI (Ctrl+E), MML, FamiStudio text (.txt), Package copy (.csp) | the same writer as `python -m chipsynth export-song`, for the song as it is now (unsaved edits included) |
+| Import > MML, MIDI, FamiStudio text (.txt), FamiStudio project (.fms), GoatTracker 2 (.sng), SID Factory II (.sf2), SID-Wizard (.swm), WAV sample | the same readers as `python -m chipsynth import` |
+| Export > WAV, MIDI (Ctrl+E), MML, FamiStudio text (.txt), GoatTracker 2 (.sng), Package copy (.csp) | the same writer as `python -m chipsynth export-song`, for the song as it is now (unsaved edits included) |
 | Last report... | shows the latest import / export report again |
 
 What a conversion approximated or left out is never silent: the status line counts it, and a short report window lists
-every line (a clean conversion needs no window). Dropping a `.sng`, `.txt`, `.fms` or `.wav` on the window imports it too.
+every line (a clean conversion needs no window). Dropping a `.sng`, `.sf2`, `.swm`, `.txt`, `.fms` or `.wav` on the window imports it too.
 
 * **WAV** export asks for the trips round the loop, normalizing to -1 dBFS, and the whole song or just the selected notes;
-  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL and which Version to stamp (the default, a Reference file..., a typed version, or None; the last choice is remembered; see "FamiStudio versions" below); **GoatTracker** import asks the region
-  (the file does not record it), the multispeed and which subtune; a FamiStudio file with several songs asks which.
-* **One song** from a FamiStudio or GoatTracker file opens as a new unsaved song (Save asks where to put it), like a
+  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL and which Version to stamp (the default, a Reference file..., a typed version, or None; the last choice is remembered; see "FamiStudio versions" below); **GoatTracker** export asks PAL or NTSC, the multispeed and the tempo mode (see below); **GoatTracker** import asks the region
+  (the file does not record it), the multispeed and which subtune; a FamiStudio file with several songs asks which; **SID Factory II** import asks the timing (as the file says, NTSC or PAL) and which song; a **SID-Wizard** import asks the region and the subtune (the file records its own frame speed).
+* **One song** from a FamiStudio, GoatTracker or SID-Wizard file opens as a new unsaved song (Save asks where to put it), like a
   MIDI file. **Several songs** are written into a `.csp` package as `import` does: the open song's package when it has
   a `.csp` file, else `NAME.csp` beside the imported file (an existing file keeps its other songs, and the same ids are
   replaced, with a copy of the old file in `backups/`). The first of them opens. The options window says where they go.
@@ -188,10 +228,10 @@ and `COMMAND -h` give every option.
 
 | command | does |
 |---|---|
-| `import PKG.csp FILE.mml...` | add songs to a package (created if missing). `--id NAME` names the song, `--shared` adds a library file's instruments / fx / scales / samples to the package, `--no-replace` refuses an id already there, `--lib DIR` / `--samples DIR` say where a game's `music/lib` and `.dpcm` files are. `.mid` files work too, and so do FamiStudio text files (`.txt`, from File > Export > FamiStudio Text; `--song NAME`, `--region ntsc|pal`, `--report FILE`) and FamiStudio projects (`.fms`, formats 15 to 19 = FamiStudio 4.1 to 4.5, same options), and so do GoatTracker 2 songs (`.sng`; `--song N` is the subtune, `--region pal|ntsc` defaults to pal, `--multispeed 1|2|4`, `--report FILE`: the file records none of these) |
+| `import PKG.csp FILE.mml...` | add songs to a package (created if missing). `--id NAME` names the song, `--shared` adds a library file's instruments / fx / scales / samples to the package, `--no-replace` refuses an id already there, `--lib DIR` / `--samples DIR` say where a game's `music/lib` and `.dpcm` files are. `.mid` files work too, and so do FamiStudio text files (`.txt`, from File > Export > FamiStudio Text; `--song NAME`, `--region ntsc|pal`, `--report FILE`) and FamiStudio projects (`.fms`, formats 15 to 19 = FamiStudio 4.1 to 4.5, same options), and so do GoatTracker 2 songs (`.sng`; `--song N` is the subtune, `--region pal|ntsc` defaults to pal, `--multispeed 1|2|4`, `--report FILE`: the file records none of these), and SID Factory II songs (`.sf2`; `--song N` is the song, `--region pal|ntsc` overrides the PAL / NTSC the file records, `--report FILE`), and SID-Wizard songs (`.swm`; `--song N`, `--region pal|ntsc` (default pal: the file does not say), `--report FILE`) |
 | `list SOURCE...` | the components of `.csp` / `.mml` / folders: `--type song,sample,...` (aliases `instr`, `key`), `--name 'd*'` (a glob; `TYPE:NAME` for one type) |
 | `export PKG.csp` | components as MML: `-d DIR` (songs as `ID.mml`, the rest in `lib/PACKAGE.mml`, samples in `samples/NAME.dpcm`, which is a game's `music/` layout), or `-o FILE` (`-` for stdout) for one thing; `--type` / `--name` choose; `--midi` writes songs as `.mid`. With no `--type`: songs and the shared parts |
-| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml` or `csp` (from OUT's ending, or `-f`). `render` is the same command |
+| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml`, `csp`, `famistudio` (`.txt`) or `goattracker` (`.sng`) (from OUT's ending, or `-f`). `render` is the same command. FamiStudio: `--region ntsc|pal`, `--fs-version X.Y.Z`. GoatTracker: V1-V3 only; `--region pal|ntsc` (default pal, as the importer), `--multispeed 1|2|4`, `--gt-tempo exact|speed`; what it left out or approximated is printed |
 | `generate`, `dump`, `build` | as before |
 
 `export-song` options for a **WAV** (any of them with another format is an error):
@@ -212,6 +252,19 @@ and `COMMAND -h` give every option.
 A song exported as MML (`export`, or `export-song -f mml`) declares the package samples it plays under `[sample]` and writes
 them as `samples/NAME.dpcm` beside it; import it with `--samples samples` to get the same package back. In Python the same
 work is `components.py` (`components`, `select`, `export_mml`, `import_mml`) and `exporter.py` (`export_song`, `AudioOptions`).
+
+A song exported as **GoatTracker 2** keeps V1-V3 as the three SID voices, with notes, rests, key-offs, the loop point and the tempo,
+and each instrument's ADSR, waveform and pulse width; an arpeggio, a pulse-width sweep and vibrato become a wavetable, a pulse
+table and a speed table entry. More voices, the DACs, echo, reverb, volume, pan, slides and the filter are left out, and every
+change is printed. The file does not record PAL or NTSC or the multispeed, so open it in the importer (or play it) with the same
+settings:
+
+    python -m chipsynth export-song music/forest.csp:dawn -o dawn.sng --region pal --multispeed 1
+    python -m chipsynth import music/back.csp dawn.sng --region pal --multispeed 1
+
+`--gt-tempo exact` (the default) changes the speed on the rows that need it when the song's tempo is not a whole number of frames
+a row, so every note starts on the nearest frame; `--gt-tempo speed` writes one speed (a whole number of frames a row) and says how
+far the tempo is out. A row lasts at least 3 frames, so a very fast song is moved to coarser rows (or use `--multispeed 2`).
 
 ## Tests
 

@@ -120,7 +120,7 @@ class Composer(FileMenu):
         self._stack_sel = -1                 # the voice the stack last scrolled to
         self.tr = TR.Cursor()
         self.prompt = None                   # a one-line text box: {label, text, apply}
-        self.newdlg = dict(kind=musicgen.KINDS.index("town"), mood=0, seed="1", focus="kind")   # the New dialog
+        self.newdlg = dict(kind=musicgen.KINDS.index("town"), mood=0, seed="1", focus="kind", opts=set())   # the New dialog
         self.guide = None                    # (tonic, scale name) shaded in the roll, or None
         self.imported = {}                   # samples brought in from WAV files this session
 
@@ -504,8 +504,8 @@ class Composer(FileMenu):
         elif t == pygame.KEYDOWN:
             self.on_key(e)
         elif t == getattr(pygame, "DROPFILE", -1):
-            if str(e.file).lower().endswith((".wav", ".sng", ".txt", ".fms")):
-                self.import_begin(e.file)                  # WAV / GoatTracker / FamiStudio: asks for the options it needs
+            if str(e.file).lower().endswith((".wav", ".sng", ".sf2", ".swm", ".txt", ".fms")):
+                self.import_begin(e.file)                  # WAV / GoatTracker / SID Factory II / SID-Wizard / FamiStudio: asks for the options it needs
             else:
                 self.open_begin(e.file)
 
@@ -1429,6 +1429,11 @@ class Composer(FileMenu):
         self.overlay = "new"
 
     SEED_MAX = 999999
+    NEW_OPTIONS = musicgen.FX_WORDS + ("degrees", "dac", "dac-bass", "voice")      # the generator's option words (toggles in the dialog)
+
+    def new_toggle(self, word):
+        """Switch one of the generator's option words on or off in the New dialog."""
+        self.newdlg["opts"] ^= {word}
 
     def new_seed(self):
         """The dialog's seed as a number (a blank box counts as 1)."""
@@ -1443,7 +1448,8 @@ class Composer(FileMenu):
 
     def new_dialog_text(self):
         d = self.newdlg
-        return "%s %d %s" % (musicgen.KINDS[d["kind"]], self.new_seed(), musicgen.MOODS[d["mood"]])
+        words = [w for w in self.NEW_OPTIONS if w in d["opts"]]
+        return " ".join(["%s %d %s" % (musicgen.KINDS[d["kind"]], self.new_seed(), musicgen.MOODS[d["mood"]])] + words)
 
     def finish_new(self, ok):
         if not ok:
@@ -1506,6 +1512,7 @@ class Composer(FileMenu):
         seed = None
         mood = ""
         dac = {"dac": False, "dac-bass": False, "voice": False}       # words that turn the DAC parts on
+        fx, degrees = [], False                                       # the effect words, and scale-degree notes
         for w in words[1:]:
             if w.isdigit():
                 seed = int(w)
@@ -1513,15 +1520,19 @@ class Composer(FileMenu):
                 mood = w
             elif w in dac:
                 dac[w] = True
+            elif w in musicgen.FX_WORDS or w == "fx":
+                fx += musicgen.FX_WORDS if w == "fx" else [w]
+            elif w == "degrees":
+                degrees = True
             else:
-                self.say("'%s' is neither a seed number, a mood (%s) nor dac / dac-bass / voice." % (
-                    w, ", ".join(m for m in musicgen.MOODS if m)), 5.0)
+                self.say("'%s' is neither a seed number, a mood (%s), dac / dac-bass / voice, degrees nor an effect (%s, fx)." % (
+                    w, ", ".join(m for m in musicgen.MOODS if m), ", ".join(musicgen.FX_WORDS)), 6.0)
                 return False
         if seed is None:
             seed = random.randint(1, 9999)
         try:
-            song = Song.from_mml(musicgen.generate(words[0], seed, mood, dac=dac["dac"], dac_bass=dac["dac-bass"], voice=dac["voice"]),
-                                 self.lib)
+            song = Song.from_mml(musicgen.generate(words[0], seed, mood, dac=dac["dac"], dac_bass=dac["dac-bass"], voice=dac["voice"],
+                                                      fx=fx, degrees=degrees), self.lib)
         except (mml.MMLError, ValueError) as e:
             self.say("The generator failed: %s" % e)
             return False

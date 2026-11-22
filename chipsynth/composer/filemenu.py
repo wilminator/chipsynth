@@ -7,7 +7,7 @@ file dialog; the menu and its dialogs (`choose_path`) only find the path and the
 format code could not carry over (approximated / left out) goes to the status line and, when there is any, to the
 report overlay; "Last report..." in the menu shows it again.
 
-How a multi-song import behaves (FamiStudio songs, GoatTracker subtunes):
+How a multi-song import behaves (FamiStudio songs, GoatTracker and SID-Wizard subtunes, SID Factory II songs):
   * one song comes in as a new, unsaved song (Save asks where to put it), like opening a MIDI file;
   * several songs are written into a .csp package, as `python -m chipsynth import` does: the open song's package
     when it has a .csp file, else NAME.csp beside the imported file (an existing file keeps its other songs and the
@@ -137,7 +137,7 @@ class FileMenu:
             root.destroy()
             return path or ""
         except Exception:
-            self.say("No file dialog here: drag the file onto the window (a .sng, .txt, .fms, .mid, .mml, .csp or .wav).")
+            self.say("No file dialog here: drag the file onto the window (a .sng, .sf2, .swm, .txt, .fms, .mid, .mml, .csp or .wav).")
             return ""
 
     def open_songs_overlay(self):
@@ -221,13 +221,13 @@ class FileMenu:
         several songs...), then import_file.  Formats that need nothing import at once."""
         kind = kind or fo.kind_of(path)
         if kind is None:
-            self.say("Can't tell what %s is: import takes .mml, .mid, .txt or .fms (FamiStudio), .sng (GoatTracker) or .wav." % Path(path).name, 8.0)
+            self.say("Can't tell what %s is: import takes .mml, .mid, .txt or .fms (FamiStudio), .sng (GoatTracker), .sf2 (SID Factory II), .swm (SID-Wizard) or .wav." % Path(path).name, 8.0)
             return False
         if kind == "wav":
             return self.import_wav_options(path)
         if kind == "mid":
             return self.open_begin(path)
-        if not (fo.is_famistudio(kind) or kind == "goattracker"):
+        if not (fo.is_famistudio(kind) or kind in ("goattracker", "sf2", "sidwizard")):
             return self.import_file(path, kind)
         try:
             names = fo.song_names(kind, path)
@@ -245,9 +245,13 @@ class FileMenu:
         if len(names) > 1:
             note = ("Several songs go into %s (%s) and the first opens; one song opens unsaved."
                     % (target.name, "the open package" if self.package_path() else "new, beside the file"))
-        if fo.is_famistudio(kind):
+        if fo.is_famistudio(kind) or kind == "sf2":
             rows = [("region", "Timing", [(None, "as the file says"), ("ntsc", "NTSC"), ("pal", "PAL")], 0),
                     ("song", "Songs", songs, 0)]
+        elif kind == "sidwizard":
+            rows = [("region", "Region", [("pal", "PAL (50 Hz)"), ("ntsc", "NTSC (60 Hz)")], 0),
+                    ("song", "Subtune", songs, 0)]
+            note = ("The file does not record its region (it does record its own frame speed). " + note).strip()
         else:
             rows = [("region", "Region", [("pal", "PAL (50 Hz)"), ("ntsc", "NTSC (60 Hz)")], 0),
                     ("multispeed", "Multispeed", [(1, "x1"), (2, "x2"), (4, "x4")], 0),
@@ -325,8 +329,8 @@ class FileMenu:
             return self.open_path(path, guard=guard, drum_lanes=drum_lanes)
         if kind == "mml":
             return self.import_mml(path, guard)
-        if not (fo.is_famistudio(kind) or kind == "goattracker"):
-            self.say("Can't tell what %s is: import takes .mml, .mid, .txt or .fms (FamiStudio), .sng (GoatTracker) or .wav." % path.name, 8.0)
+        if not (fo.is_famistudio(kind) or kind in ("goattracker", "sf2", "sidwizard")):
+            self.say("Can't tell what %s is: import takes .mml, .mid, .txt or .fms (FamiStudio), .sng (GoatTracker), .sf2 (SID Factory II), .swm (SID-Wizard) or .wav." % path.name, 8.0)
             return False
         try:
             loaded = fo.read_import(kind, path, self.lib, region=region, multispeed=multispeed, song=song)
@@ -358,7 +362,7 @@ class FileMenu:
     def apply_import(self, loaded, kind, target):
         """Put read songs in the window (one song) or into a package file (several); show the report."""
         lines = fo.report_lines(loaded.report)
-        label = "FamiStudio" if fo.is_famistudio(kind) else "GoatTracker"
+        label = "FamiStudio" if fo.is_famistudio(kind) else "SID Factory II" if kind == "sf2" else "SID-Wizard" if kind == "sidwizard" else "GoatTracker"
         if len(loaded.songs) == 1:
             sid, song, samples, title = loaded.songs[0]
             lib = None
@@ -431,6 +435,14 @@ class FileMenu:
                                    "with another version than its own: Reference file takes the Version from a file your FamiStudio exported.",
                               apply=self.export_famistudio_stamped)
             return True
+        if fmt == "goattracker":
+            self.show_options("Export GoatTracker song",
+                              [("region", "Timing", [("pal", "PAL (50 Hz)"), ("ntsc", "NTSC (60 Hz)")], 0),
+                               ("multispeed", "Multispeed", [(1, "x1"), (2, "x2"), (4, "x4")], 0),
+                               ("gt_tempo", "Tempo", [("exact", "exact (speed changes where needed)"), ("speed", "one speed")], 0)],
+                              ok="Choose file...", note="V1-V3 only; the file does not record PAL or NTSC or multispeed, so open it with the same; what is left out is reported.",
+                              apply=lambda v: self.export_choose(fmt, **v))
+            return True
         return self.export_choose(fmt)
 
     def export_famistudio_stamped(self, v):
@@ -475,9 +487,9 @@ class FileMenu:
         pkg.add_song(sid, self.song, self.ed.lib)
         return pkg, sid
 
-    def export_as(self, fmt, path, loops=0, normalize=False, part="song", region="ntsc",
-                  fs_version=exporter.DEFAULT_FS_VERSION, fs_reference=None):
-        """Write the open song to `path` as wav, mid, mml, famistudio or csp with exporter.export_song, the code
+    def export_as(self, fmt, path, loops=0, normalize=False, part="song", region=None,
+                  fs_version=exporter.DEFAULT_FS_VERSION, fs_reference=None, multispeed=1, gt_tempo="exact"):
+        """Write the open song to `path` as wav, mid, mml, famistudio, goattracker or csp with exporter.export_song, the code
         `python -m chipsynth export-song` runs.  A file it replaces is copied to backups first.  Returns True."""
         if self.song is None:
             self.say("There is no song to export.", 3.0)
@@ -499,12 +511,12 @@ class FileMenu:
             if fmt != "mml":
                 backup_file(self.root or path.parent, path)
             r = exporter.export_song(pkg, sid, path, opts, fmt, lib=self.ed.lib, region=region,
-                                fs_version=fs_version, fs_reference=fs_reference)
+                                fs_version=fs_version, fs_reference=fs_reference, multispeed=multispeed, gt_tempo=gt_tempo)
         except (exporter.ExportError, PackageError, SongError, mml.MMLError, OSError) as e:
             self.say("Can't export %s: %s" % (path.name, e), 8.0)
             return False
         lines = list(r.notes)
-        if fmt != "famistudio":                          # only FamiStudio's notes include plain facts
+        if fmt not in ("famistudio", "goattracker"):     # only the tracker formats' notes include plain facts
             lines = ["warning: " + x for x in lines]
         else:
             lines = [x if x.startswith(WARNING) else "note: " + x for x in lines]
