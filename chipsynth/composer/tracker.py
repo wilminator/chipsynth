@@ -6,6 +6,7 @@ A tracker shows time going down the page: one row per `rt` ticks (the snap lengt
 (V1-V4, D1, D2).  A note shows on the row where it starts; the rows it keeps sounding through show a hold mark.
 """
 from bisect import bisect_right
+from collections import Counter
 
 from .model import pitch_name
 
@@ -20,6 +21,7 @@ class Cursor:
     def __init__(self):
         self.row, self.col, self.top, self.octave = 0, 0, 0, 4
         self.left = 0                       # first column on screen (songs with more tracks than fit)
+        self.vol_entry = None               # digits typed so far while entering a volume ("/" starts it), else None
 
     def tick(self, rt):
         return self.row * rt
@@ -119,3 +121,33 @@ def hit_at(roll, col, tick, rt):
         if tick <= b.start < tick + rt:
             return b
     return None
+
+
+def voice_default(roll, col):
+    """The volume a voice's notes normally have: the commonest one (a tie goes to the volume the voice starts with).
+    A note with this volume is drawn dimmed in the volume column; one that differs stands out.  15 for an empty voice
+    or a drum column."""
+    if col >= roll.nv or not roll.notes[col]:
+        return 15
+    notes = sorted(roll.notes[col], key=lambda n: n.start)
+    count = Counter(n.vol for n in notes)
+    best = max(count.values())
+    for n in notes:
+        if count[n.vol] == best:
+            return n.vol
+    return 15
+
+
+def type_volume(entry, digit):
+    """Add a typed digit to the volume being entered.  Returns (entry, done): `done` is True when the value cannot get
+    longer (0, or a digit from 2 up: nothing above 15 exists), so a single key press sets the volume; a 1 waits for a
+    second digit (0-5) or Enter.  A digit that would make more than 15 is ignored."""
+    new = entry + str(digit)
+    if int(new) > 15:
+        return entry, False
+    return new, int(new) == 0 or int(new) >= 2 or len(new) == 2
+
+
+def entry_volume(entry):
+    """The number a finished entry means, or None if nothing has been typed."""
+    return int(entry) if entry else None

@@ -12,7 +12,8 @@ It builds on the command line from PR #1 (`import`, `export-song`, `components.p
 | **GoatTracker 2** (`.sng`) | **Do second.** Import and export, about 3 slices | the simple, de facto interchange format of the SID scene (SID Factory II imports it); GPL-2+ |
 | SID Factory II (`.sf2`) | Skip a native format; reach it through GoatTracker | a driver-defined C64 memory image, no spec found; it already imports GoatTracker `.sng` |
 | Furnace (`.fur`) | Third, optional, large | one format covers SID *and* the NES (and more); actively developed; but version-gated, with per-chip instrument types |
-| CheeseCutter (`.ct`), SID-Wizard (`.swm`) | Skip for now | no format spec found; SID-Wizard is in maintenance mode; both are reachable through SID Factory II / their own exporters |
+| CheeseCutter (`.ct`) | Skip for now | no format spec found; reachable through SID Factory II |
+| **SID-Wizard** (`.swm`) | **Import built** (section 4) | the spec ships in the release (`SWM-spec.src`) and the source is WTF-licensed; the player source settles the rest |
 
 Nothing here maps exactly. chipsynth's `Instrument` is a static recipe (waveform, ADSR, vibrato, arpeggio, pulse sweep,
 filter sweep); trackers drive instruments with *per-frame programs* (envelopes, tables). Every import is an approximation
@@ -36,8 +37,7 @@ Checked against the projects' own pages or source (links in section 8):
 - GoatTracker's `.sng` byte layout. Section 4 is from the constants a third-party converter publishes (`GTS5` header, 25-byte instruments,
   63 instruments, 208 patterns, 32 subtunes, 255-row tables, 128 rows per pattern) and from memory of the format. **Slice 0 for
   GoatTracker is reading `gsong.c` / `gcommon.h` and fixing this section.**
-- SID Factory II's license (no LICENSE file seen on the repository page; one article says "open source"), SID-Wizard's license
-  ("open source" informally, source shipped in the release), and any `.ct` / `.swm` / `.sf2` layout.
+- SID Factory II's license (no LICENSE file seen on the repository page; one article says "open source"), and any `.ct` / `.sf2` layout. (SID-Wizard: found later, section 4.)
 - Whether FamiStudio's MIDI file code reads, writes or both.
 - The exact compression FamiStudio uses for the `.fms` payload (it is .NET `System.IO.Compression` "Optimal"; probably deflate/zlib).
 
@@ -71,7 +71,7 @@ never commit someone else's songs as test data (see section 6).
 | Triangle | V3 `tri` | no volume on the NES triangle: export ignores note volume there |
 | Noise | V4 `noise` | NES has 16 noise periods and two modes; chipsynth has `nmode` long/short, matching the mode bit; pitch maps to period |
 | DPCM | D1 (DAC) | **chipsynth's `.dpcm` is the NES delta format and uses the NES rate table** (`synth.DPCM_RATES`, index 0-15), so samples round trip as bytes; FamiStudio's `Data` is the same 1-bit deltas |
-| Expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM) | none | import: skip the channels and report; later maybe VRC6 saw / FDS and N163 waves to chipsynth `saw` / a wavetable if the engine gets one |
+| Expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM) | V5 and up (import) | import: VRC6 pulses and saw, MMC5 pulses, S5B / EPSM squares and the FDS / N163 wavetables (to the nearest chipsynth wave, reported approximate) take extra voices; VRC7, EPSM FM and rhythm and the MMC5 PCM channel are skipped and reported (section 9) |
 | volume / pitch / arpeggio / duty envelopes (per frame) | `a d s r vol`, `arp`, `vib`, `pws` | the hard part, see below |
 | note effects (vibrato, slide, volume slide, pitch, cut, delay, speed) | `Fx` events, `slide`, `Tempo` | partial |
 | tempo (frames per row, or FamiTracker BPM mode), PAL / NTSC | `Tempo` events, 96 ticks per quarter | NTSC frame 60.0988 Hz, PAL 50.0070 Hz; rows -> ticks needs one rule for "row length" |
@@ -119,7 +119,7 @@ envelopes. That is exact up to the 60 Hz sampling.
 | editor | license | latest seen | format | verdict |
 |---|---|---|---|---|
 | **SID Factory II** | unverified (open source) | build 20260314; "next release" notes pending | `.sf2`; imports GoatTracker, CheeseCutter, MOD | active; reach via GoatTracker import |
-| **SID-Wizard** | unverified (source in the release) | 1.97, 2026-06-24 | `.swm` ("SWM1"), no spec found | maintained; author says feature-complete |
+| **SID-Wizard** | WTF (source README, verified 2026-11-22) | 1.97, 2026-06-24 | `.swm` ("SWM1"), spec in the source (`SWM-spec.src`) | maintained; author says feature-complete; **import built** |
 | **Furnace** | GPL-2+/3 | v0.6.8.3 | `.fur`, documented | very active; C64 SID among its many chips |
 | **CheeseCutter** | GPL-2.0 | SDL2 port merged 2026-03 | `.ct`, no spec found | alive |
 | **GoatTracker 2** | GPL-2+ | 2.77 (Debian, copyright to 2025); Stereo variant | `.sng` "GTS5" | stable; the format others import |
@@ -158,6 +158,40 @@ a speedtable for `vib`; quantize note starts to frames (speed = frames per row f
 
 Reaching SID Factory II: its importer reads `.sng`, so a good `.sng` exporter is also a path into SF2, and from SF2 into a playable `.sid`/PRG.
 `.sid` files are a different thing (6502 player code + data); importing one would need a 6502 + SID emulator and register-trace to notes. Out of scope.
+
+### SID-Wizard `.swm` ("SWM1")
+
+Read 2026-11-22. **Licences:** SID-Wizard 1.97's own README (the `anarkiwi/sid-wizard` repository carries the 1.97 sources under `native/`, plus a Vessel MIDI port) says: "let's declare SID-Wizard as a WTF-licensed tool, so you can do WTF you want with it" (Hermit Software). `pysidwizard` 0.7.0
+(`anarkiwi/pysidwizard`, Josh Bailey), a separate from-first-principles reader / writer / player, is Apache-2.0. Both were read only; nothing was copied.
+
+**What was read:** `native/sources/SWM-spec.src` (Hermit's own description of the file: header offsets, instrument layout, note and effect values),
+`SWMconvert.c` (`ProcessSWMver1` is a reader written by the format's author; `GenerateMIDI` shows how rows, the orderlist, transpose and tempo play),
+`include/player.asm` (the 6502 player: the sequencer, packed empty rows, the tempo counter, the wave/arpeggio and pulse tables), and from `pysidwizard`
+`docs/format.md`, `constants.py`, `reader.py`, `model.py` and the grammar. Where two of them describe the same thing they agree (header, the back-to-front layout,
+pattern packing, orderlist commands, instrument layout, note numbering); the places only the player settles are noted below.
+
+**Layout** (all bytes; a `.swm` is a C64 PRG, so two load-address bytes come first; a `.P00` has a 26-byte `C64File` header before those; a bare module is also read):
+
+| part | content |
+|---|---|
+| header, 64 bytes | `SWM1`; 4 frame speed (1-8); 11 default pattern length; 12 sequence count; 13 pattern count; 14 instrument count; 15 chord table size; 16 tempo table size; 19 driver; 20 tuning (0 = 440 Hz, 1 = 432 Hz, 2 = just intonation for C); 24-63 author text; the rest is obsolete editor settings |
+| sequences | one orderlist per channel, three per subtune; each is its bytes then one size byte |
+| patterns | each is its packed rows, then a size byte (unpacked bytes + 1 for the `$FF` end) and a row-count byte |
+| instruments | each is its data (without the last `$FF`), then a size byte, then an 8-character name |
+| chord table, tempo table | as many bytes as the header says |
+| subtune tempos | two bytes (left, right) per subtune: the last bytes of the file |
+
+So the file is read from its end. Orderlist bytes: `$00-$7F` pattern (1-based), `$80-$9F` transpose (byte - `$90`), `$A0-$AF` main volume, `$B0-$EF` this channel's tempo (byte - `$B0`),
+`$F0-$FD` no-op, `$FE` end, `$FF` then a position (below `$80`: loop to that byte of this orderlist; `$80` and up: jump to another subtune). Pattern rows: a note byte, whose
+bit 7 says an instrument byte follows, whose bit 7 says an effect byte follows, which takes a value byte when it is below `$20`; notes `$01-$5F` (1 is C-0), `$7E` gate off, `$60-$6F` vibrato amplitude,
+`$78-$7F` other note effects; a byte `$70-$77` after a `$00` stands for 2-9 more `$00` rows. Instruments: 16 header bytes (3 attack/decay, 4 sustain/release, 5 vibrato,
+7 arpeggio speed, 8 default chord, 9 octave shift, 10 and 11 the pulse and filter table offsets), then the wave/arpeggio, pulse and filter tables of 3-byte rows, each ending in `$FF`.
+A tempo is the number of player calls a row lasts; a tempo list repeats (a funk tempo is two entries). The player is called `frame speed` times per video frame.
+
+**How it was checked:** Hermit's own converter (`SWMconvert.c`, compiled locally, not committed) wrote SWM files from a MIDI file and the importer read them back to the same notes; its
+SWM-to-MIDI export was then compared note by note (start tick and pitch, all three channels) with the importer's output for hand-built files with transposes, an orderlist tempo, a track-tempo
+pattern effect, a subtune tempo, an instrument octave shift and packed gaps: identical. 6000 randomly damaged files gave errors, never a crash or a hang. **Not checked:** a real song saved by the editor
+(none was to hand), the result by ear, and everything the notes in section 9 list.
 
 ### Furnace `.fur`
 
@@ -218,7 +252,7 @@ chipsynth/formats/
    approximately. Chip details are to be verified before building.
 6. **Import with more than four voices.** Every source channel is kept as a named part. V1-V4 and D1-D2 are built from the most important parts
    (ranked, gaps filled), with a report and a `--voices` override.
-7. **Licenses.** SF2 and SID-Wizard licenses are unknown: ask the authors before depending on either. CheeseCutter is GPL-2.0 only: no code is copied.
+7. **Licenses.** The SF2 license is unknown: ask the author before depending on it. SID-Wizard's own README declares it WTF-licensed and `pysidwizard` is Apache-2.0 (both read only, section 4). CheeseCutter is GPL-2.0 only: no code is copied.
 
 Related design notes (not part of this work): an application-defined voice/DAC count, and the vertically scrollable track list (composer Tracks view).
 
@@ -228,7 +262,7 @@ Related design notes (not part of this work): an application-defined voice/DAC c
 - Furnace: https://github.com/tildearrow/furnace (README; `papers/format.md`; releases)
 - CheeseCutter: https://github.com/theyamo/CheeseCutter (GPL-2.0); `ct2util(1)` man page on manpages.debian.org
 - SID Factory II: https://github.com/Chordian/sidfactory2 and https://blog.chordian.net/sf2/
-- SID-Wizard: https://sourceforge.net/projects/sid-wizard/ ; CSDb release pages for 1.93-1.97 (csdb.dk), theoasisbbs.com coverage of 1.93 and 1.95
+- SID-Wizard: https://sourceforge.net/projects/sid-wizard/ ; CSDb release pages for 1.93-1.97 (csdb.dk), theoasisbbs.com coverage of 1.93 and 1.95; the 1.97 sources (`native/sources/SWM-spec.src`, `SWMconvert.c`, `include/player.asm`, README) in https://github.com/anarkiwi/sid-wizard ; https://github.com/anarkiwi/pysidwizard (Apache-2.0; `docs/format.md`, `src/pysidwizard/`)
 - GoatTracker: Debian package `goattracker` 2.77+ds-1 and its copyright file; ChiptuneSAK's `goat_tracker` module (published constants for `GTS5`)
 
 ## 9. Status
@@ -249,21 +283,38 @@ at their average), per-pattern tempo settings, looping DPCM, volume changes in t
 shift rate: the top periods are above what chipsynth can play.
 
 **FamiStudio text export: built** (PR #19). `chipsynth/formats/famistudio_export.py`, with the reader as its check (what is written must read back; `tests/test_famistudio_export.py`).
-`python -m chipsynth export-song SOURCE[:SONG] -o OUT.txt [--region ntsc|pal] [--fs-version X.Y.Z]` (default 4.5.3, NTSC), and the composer's File > Export > FamiStudio text.
+`python -m chipsynth export-song SOURCE[:SONG] -o OUT.txt [--region ntsc|pal] [--fs-version X.Y.Z|none] [--fs-reference FILE]` (default 4.5.3, NTSC; see the version policy below), and the composer's File > Export > FamiStudio text.
 V1, V2 -> Square 1, 2; V3 -> Triangle; V4 -> Noise; D1 -> DPCM. The volume ADSR and the arpeggio are sampled at the frame rate into FamiStudio envelopes. The file says it was
-written by FamiStudio `--fs-version`, because FamiStudio only reads files whose version starts like its own. Dropped, and said so in the Report: more than four voices and any DAC
+written by FamiStudio `--fs-version`, because FamiStudio only reads files whose version starts like its own.
+**Version policy** (branch `fs-version-policy`): the author's FamiStudio 4.2.0 refused files stamped 4.5.3 and 4.2.0 alike, and newer FamiStudio source skips the check when `Version` is absent
+and otherwise compares only the first three characters. So nothing is hard-coded: `DEFAULT_VERSION` (famistudio_export.py) is the one default; `--fs-version none` omits the attribute;
+`--fs-reference FILE` copies the exact Version string from the first line of a file the author's FamiStudio exported (no Version: none is written and the report says so; not FamiStudio text: refused);
+the composer dialog offers default, Reference file..., a typed version and None, and remembers the choice in its settings (`fs_stamp`, `fs_typed`, `fs_ref`). The report names the stamp and why another may be needed.
+The importer reads files with or without a Version. **Not verified** against a real FamiStudio 4.2.0. Dropped, and said so in the Report: more than four voices and any DAC
 beyond D1, echo, reverb, the filter, vibrato, slide, pan, pulse-width sweeps and tempo changes. **Not verified:** the files have been read back by chipsynth's own importer only,
 not opened in a real FamiStudio (a test set of generated songs, NTSC and PAL, was made for the author to check by eye and ear).
+
+**FamiTracker text export: built** (branch `famitracker-export`). `chipsynth/formats/famitracker_export.py`; `python -m chipsynth export-song SOURCE[:SONG] -o OUT.ftm.txt` (or `-f famitracker`; a
+plain `.txt` stays FamiStudio's) `[--region ntsc|pal]`, and the composer's File > Export > FamiTracker text. Why: FamiStudio's own text only loads in the release that wrote it, and FamiTracker's
+`# FamiTracker text export 0.4.2` (read by FamiTracker and by FamiStudio's File > Import > FamiTracker Text, which accepts exactly that version) has been stable. Written from the format, with FamiStudio's
+reader (`FamitrackerTextFile.cs`, `FamitrackerBaseFile.cs`, MIT) read to be sure every line is one it accepts. V1, V2 -> Pulse 1, 2; V3 -> Triangle; V4 -> Noise; D1 -> DPCM (`DPCMDEF` / `DPCM`, `KEYDPCM`).
+`INST2A03` instruments with `MACRO` sequences: volume (the ADSR sampled once a frame, looping on its sustain), duty (the pulse width snapped to the NES's four, a pulse-width sweep sampled a frame at a time,
+the noise mode), arpeggio (semitone offsets a frame at a time, looping); instruments that sound alike are one. Note volume is written on every note. Timing: a row is a whole number of ticks; `speed` and `tempo`
+are chosen so FamiTracker's tempo counter lands the row length (150 / tempo frames a tick on NTSC, 125 / tempo on PAL) within a tenth of a percent where the range allows, preferring a tempo near the default;
+patterns are whole bars (16-64 rows where possible, so the loop point lands on a pattern's first row), identical patterns are shared, and the loop is `Bxx` on the song's last row (`C00` for a `once` song).
+Left out, and said in the Report: voices past V4, DACs past D1, echo, reverb, detune, the filter, vibrato, slide, pan, tempo changes, the release tail (notes are cut where they end), the volume envelope on the triangle
+(no volume on the NES), the arpeggio on noise; over the limits (128 patterns, 64 instruments, 36 samples) the end or the extras go. The check is a reader of our own in `tests/test_famitracker_export.py`
+that is as strict as FamiStudio's about where things sit on a line, plays the file with FamiStudio's copy of the tempo counter, and compares every note's frame and pitch.
+**Not verified:** the files were not opened in FamiTracker or FamiStudio (neither can run here); `KEYDPCM`'s trailing fields, the sense of a macro's release field (none is written) and the noise note letters were taken
+from FamiStudio's writer and reader, not from FamiTracker's own source.
 
 **Composer File menu: built** (PR #21). `chipsynth/composer/filemenu.py`: New (blank or from the generator), Open, Save, Save As, Import (MML, MIDI, FamiStudio text, GoatTracker) and
 Export (WAV, MIDI, MML, FamiStudio text, package copy), the same writers and importers as the command line, with a "Last report..." entry and the unsaved-edits dialog
 (Save, Don't save, Cancel) before anything replaces the open song.
 
-Not built: simulating table-driven instruments with short per-frame notes (decision 2 above; the fit and the report come first);
-reading a version check (the importer reads any 4.x file and ignores `Version`, where FamiStudio itself refuses other versions);
-the FamiStudio binary `.fms` (import only, if at all); expansion chips (VRC6, VRC7, FDS, MMC5, N163, S5B, EPSM; the importer skips their channels and reports them).
+Not built: VRC7, EPSM FM and rhythm (see the fidelity paragraph at the end of this section).
 
-**GoatTracker `.sng` import: slices 1 and 2 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
+**GoatTracker `.sng` import: slices 1, 2 and 3 built.** `chipsynth/formats/goattracker.py`: the reader (all of the layout above, truncation and bad files are
 errors), the three voices as V1-V3, notes, rests, key-offs, order list repeat and transpose, the restart position as the loop point, tempo changes,
 and per instrument the ADSR, the first waveform and the starting pulse width. A frame is 4 ticks (4/N with multispeed N), so timing is exact at any speed.
 
@@ -277,15 +328,125 @@ subtunes). `--region` defaults to pal because the file does not say. The player'
 | pulse table: set rows (`0x8n`) and timed ramps (frames, signed speed) that rise and fall | `pws_from`, `pws_to`, `pws_rate` | run per frame to its repeat; a rise and a fall is a sweep, a ramp that jumps back or ends is played as a back-and-forth sweep (reported as approximate); only on a pulse wave |
 | speed table entry as vibrato, from pattern command 4 or the instrument's own pointer (which only works with a vibrato delay of 1 or more) | `vib_rate`, `vib_depth` on an instrument variant `NAME_vibR_D` | the swing is run per frame (the player's turn-around counter), its period gives the rate and its size against the note's SID frequency gives the depth, so a fixed entry is deeper on a low note; entries with the high bit set are relative to the note |
 
-Still reported, not carried over: wavetables with absolute notes (`0x81` and up), commands, waveform changes with no arpeggio, rows that play once before a loop, or no loop;
-pulse tables that zigzag or change width before setting one; filter tables; portamento, tone portamento and the other pattern commands; vibrato changed part-way through a note;
-vibrato delays (vibrato starts at once); vibrato of a speed entry that is missing, has speed 0 or is under 1/32 of a semitone.
 Vibrato is a triangle swing in the player and a sine in chipsynth, so it is always listed as approximate.
+
+**Slice 3 (branch `gt-commands`): the pattern commands, the rest of the wavetable and pulse idioms, and the filter.** A note that a command or
+table changes while it sounds is played as a run of chipsynth notes (one instrument per note), so each part strikes its envelope again; the Report says so.
+
+| command or table | becomes | approximate because |
+|---|---|---|
+| 1xy / 2xy portamento (speed = 16-bit speed table entry, left column high) | a one-frame note, then notes that glide (`Tweak slide`, at most 192/48 of a beat each) to the semitone the slide reaches; a later command, or 0, stops it and the pitch stays | a linear frequency slide is played as an exponential glide ending on a rounded semitone; the slide is taken to last until the next note or command |
+| 3xy tone portamento | the new note with a slide as long as the player needs to cover the distance from the voice's last pitch; 300 (tie note) is a plain new note | the held note is struck again; a slide over 192/48 of a beat arrives early |
+| 4xy vibrato on a row after the note | the note is split there, the second part with the vibrato variant (or none for 400) | struck again |
+| 5xy / 6xy set AD / SR | the instrument variant `NAME_adXY` / `NAME_srXY` for that note; the next note is the instrument again | a change on a row after the note is reported (it would change a sounding envelope) |
+| 7xy set waveform | a variant with that wave; ignored, as GoatTracker's own text says, while a wavetable is still running; on a later row it splits the note | combined waves become one wave; a silent or gate-off waveform ends the note |
+| 8xy / 9xy set wavetable / pulse pointer | the other table plays from that note (8xy also on a later row, splitting the note); 0 stops the table, and a stopped arpeggio or sweep is switched off in the variant | |
+| Axy, Bxy, Cxy and instrument filter tables | the filter is played for the whole song a frame at a time (mode, resonance, voice mask, cutoff); each note gets `filter`, and `fsweep` if the cutoff moves while it sounds | the SID filter is shared and chipsynth's is per note, so a note carries the filter as it is when it starts; the cutoff curve is chipsynth's; combined modes pick one; a sweep is a back-and-forth swing at the speed of its first rise or fall; a filter that changes mode or routing mid-note, or is switched on mid-note, is not followed |
+| Dxy master volume | a `Volume` event on all three voices | takes effect on the next note; D with a high digit (the timing mark) is ignored |
+| Exy funk tempo, F00 / F01 | row lengths alternate between the entry's two values on all channels; a tempo command ends it; F00 / F01 resume it (the loop point is found on the funk timeline) | what 00 and 01 recall is read from the command's description, not from the player |
+| wavetable with absolute notes (`0x81` and up), a pass before the loop, no loop, or waveform changes with no arpeggio | the table is run frame by frame for each note: a run of short notes (a noise hit, then the tone), then the endless tail as `arp` / `arprate` or a held note | arpeggio steps are limited to two octaves; a repeat that changes waveform plays its first step |
+| pulse table that changes the width before setting one | runs from 50% | the width the player had then is not in the file |
+| pulse table that zigzags | a cycle that is one sweep repeated is that sweep, exactly; an uneven zigzag (up to 8 peaks) is an even sweep between its lowest and highest width | uneven zigzags only |
+
+Still reported, not carried over: wavetables that run commands (rows `0xf0` and up; they are skipped for pointer commands and the instrument is left plain); pulse
+tables that drift or zigzag more than 8 times; a 5xy / 6xy or a tone portamento on a row after the note; a portamento on a note whose wavetable plays an arpeggio; a speed table entry
+that is missing (for portamento, funk tempo) or has speed 0 or is under 1/32 of a semitone (vibrato); vibrato delays (vibrato starts at once); a filter that is switched on part-way through a note.
 
 Fixed in slice 2: the song's bpm was multiplied by the multispeed, which played a multispeed song at N times its speed; it follows the video rate only (125 pal, 150 ntsc).
 Instrument names are made into identifiers (anything but letters, digits and `_` becomes `_`).
-Not built: a writer (GoatTracker `.sng` export); the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
+Not built: a writer (GoatTracker `.sng` export); the Furnace (`.fur`) importer (SID-Wizard: below). Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
 the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
 
+**SID Factory II `.sf2` import: slice 1 built.** `chipsynth/formats/sf2.py`; `python -m chipsynth import PKG.csp FILE.sf2 [--song N] [--region pal|ntsc] [--report FILE]`
+(found by the `.sf2` ending or by the word 0x1337 after the load address) and File > Import > SID Factory II (also by dropping a `.sf2`).
+*License and what was read:* the repository (github.com/Chordian/sidfactory2, checked out 2026-11-22) ships `SIDFactoryII/COPYING`, the GPL version 2 text, and its sources name
+no version, so by section 9 of that licence any published version applies (this resolves the "unverified" in section 4 and decision 7 for reading it). Read only, nothing copied:
+`driver/driver_info.h,.cpp` (the descriptor blocks), `datasources/datasource_sequence.cpp` and `datasource_orderlist.cpp` (the byte formats), `auxilarydata/*` (song list, PAL / NTSC, table row text),
+`components/component_track.cpp` (note names), `converters/` (`sf2_interface.h`, `gt/source_sng.cpp`, `cc/source_ct.cpp`, `jch/converter_jch.cpp`: how other formats map onto the tables, which fixes the table semantics),
+and the driver notes and the user manual in `dist/documentation/`. **No stand-alone file-format document was found in the repository**; the layout below is from the editor's source. The driver binaries have no source, so the 6502 code was not read.
+*Layout:* a PRG (load address, then memory). At the load address the word 0x1337, then blocks of (id, size, data): 1 descriptor (driver name in screen codes, version), 2 driver common (not needed), 3 tables
+(type, id, name, layout 0 row / 1 column major, address, columns, rows), 4 instrument cell names, 5 music data (track count, order list and sequence pointer tables and sizes), up to 0xff. Tables are found **by name**
+(`Commands`, `Instruments`, `Wave`, `Pulse`, `Filter`, `Arp`, `Tempo`, `HR`, `Init`: ids differ between drivers). A word at 0x0ffb points at the editor's blocks (type, version, size): 2 hardware (byte 1: 0 PAL, 1 NTSC),
+4 table row text (instrument names), 5 song list (count and names). Songs share sequences and tables; each has its own order lists, at `base + song * tracks * size`.
+Order list: values below 0x80 are sequences, 0x80-0xfd set the transpose (value - 0xa0 semitones), 0xfe ends, 0xff loops to the byte position that follows. Sequence: [0xc0+command] [0xa0+instrument] [0x80+duration, +0x10 tied] note, ending in 0x7f;
+note 0 is a gate-off, 0x7e keeps the gate on, 1-0x6f are notes (C-0 = 0, so 0x30 is C-4); a duration is the number of extra rows the event lasts and holds until changed. A row is `tempo + 1` frames;
+the Tempo table is a chain that ends at 0x7f and wraps to its first row, the song's Init row names where it starts.
+*Carried:* three tracks to V1-V3, notes, gate-offs, transpose, the loop (found as the first repeat of the whole player state, so tracks of different lengths loop together), stop markers, the tempo chain and tempo command (driver 11),
+several songs (as in the editor's list), PAL / NTSC from the file, instrument names, and per instrument the ADSR, the waveform (the one played longest), a fixed or shifted pitch from the wave table, a cycling wave table as `arp`,
+a pulse table's start width and sweep (the same classification as goattracker.py), and the commands local / persistent ADSR, wave pointer, pulse pointer and arpeggio (chord table). Drivers 12, 13, 15, 16 read their own instrument bytes (waveform, pulse width, wave table); other drivers keep the notes and timing only.
+*Reported, not carried:* slide, vibrato, portamento, fret slide, main volume, filter programs and the filter table, hard restart (a sound detail), ring / sync bits, tied notes (played as new notes), the Hubbard driver's extras, a linear pulse sweep (drivers 15-16),
+tracks 4-12 of the multi-SID drivers, instrument variants a command asks for beyond the five listed, any other driver (for example NP20).
+*Verified:* the container, the order list and sequence formats, the tempo chain, the Init and Arp tables and the pulse and wave row layouts are from the editor's source, and the importer loads all 67 `.sf2` files in the repository's `music` folder
+(read locally, none copied) with every song's loop found and each song compiling to a chipsynth tune, plus 1500 randomly damaged copies without anything but an `Sf2Error`. Tests build their files by hand (`tests/test_sf2_import.py`).
+*Not verified* (from the converters and notes, not from the driver code or by ear): that a wave table row lasts one frame and that a jump costs none; that a pulse add row adds its value every frame; the arpeggio command's step length
+(taken as speed + 1 frames, and the report says so); that a tempo command takes effect on the next row and for all tracks; what a tied note and a bare 0x7e after a gate-off do to the envelope (a bare 0x7e plays the last pitch again);
+the loop target when an order list loops to a sequence byte without a transpose byte in front (the transpose in force at the end of the list is kept); notes above the 96-note table that the drivers use as noise pitches (clamped to 107);
+the pulse width byte of drivers 12-16 ("XY: X = middle 4 bits, Y = top 4 bits" in the notes, read as the byte's high nibble = middle, low nibble = top). No song was compared against the real player or by ear. Not built: an `.sf2` writer.
+**FamiStudio `.fms` project import: built.** `chipsynth/formats/famistudio_binary.py` reads the binary project into the text importer's own `Project` model and
+`famistudio_text.load_project` converts it, so the mapping, the envelope fits and the Report are the same code. Written from `ProjectFile.cs`, `Compression.cs`,
+`ProjectBuffer.cs` and the `Serialize` methods of `Project`, `Song`, `Channel`, `Pattern`, `Note`, `Instrument`, `Envelope`, `Arpeggio` and `DPCMSample` (MIT, read only, on the
+author's machine from the current master, project format version 19). The header is `FMS!` (u32 `0x21534D46`), an i32 format version, an i32 payload size and a raw deflate
+stream (.NET `DeflateStream`, no zlib header); the payload is little endian, strings are UTF-16 with an i32 byte count, references are ids.
+Versions read: 15 to 19 (FamiStudio 4.1 to 4.5), every branch of those read from the source; older (before 4.1) and newer files are refused with the release and the way out (export FamiStudio
+text). `python -m chipsynth import PKG.csp FILE.fms` (by the `.fms` ending or by `FMS!`, with `--song`, `--region`, `--report`), and the composer's File > Import > FamiStudio project, drop and import dialog.
+Same as the text importer: the five NES channels, instruments, DPCM, tempo, loop point; expansion chips, pitch envelopes, effects and the rest are reported. Differences from text: the project export
+settings, folders, mixer settings and colours are read past and dropped; a DPCM sample whose source is a WAV, or DMC data with volume, rate, pitch, trim or envelope changes, is left out and
+reported (FamiStudio makes the final bytes with its own encoder when it opens the project; only the plain case is rebuilt, with its bit reverse and padding).
+Also built: the text importer checks `Version`. FamiStudio only opens text whose version starts with its own first three characters (4.5 now); chipsynth still reads any file but
+reports a version that is not 4.x as approximate and any other 4.x as a note that FamiStudio 4.5 would refuse it.
+Not verified: no real `.fms` file was read (none may be committed and the program cannot run here): the tests use files built by a writer made from the same reading of the source, so they check that
+reader and writer agree, not that a real project reads. Versions 15 to 18 differ from 19 only in gated fields, checked the same way.
+**SID-Wizard `.swm` import: built.** `chipsynth/formats/sidwizard.py` (layout and sources in section 4): the reader (the PRG, bare and `.P00` forms; truncation, bad table pointers and counts that do not add up are errors), the three
+SID voices as V1-V3, notes, rests and gate-offs (`$7E`), the orderlists (patterns, transpose, a channel's tempo, the loop position), the subtune tempo (single or funk) and the tempo pattern effects `$10`, `$11`, `$13`, `$14`,
+the frame speed from the header (a player call is 4/N ticks; exact for N = 1, 2, 4), several subtunes, and per instrument the ADSR, the first waveform, the starting pulse width, the octave shift, a wave table that loops over
+relative notes (-> `arp`, `arprate`, fitted as for GoatTracker) and a pulse table that sweeps (-> `pws_from`, `pws_to`, `pws_rate`, only on a pulse wave). The channels loop on their own in SID-Wizard but chipsynth has one loop point: the song
+is unrolled to the latest loop target and the least common multiple of the channels' loop lengths (the longest one if that passes twenty minutes), and says so.
+The command line (a `.swm` is found by its ending or by `SWM1` at the start; a single song is named for the file):
+
+    python -m chipsynth import PKG.csp FILE.swm [--region pal|ntsc] [--song N] [--report FILE]
+
+and the composer's File > Import > SID-Wizard (and dropping a `.swm`), which asks the region and the subtune. `--multispeed` is for GoatTracker only: a `.swm` records its own frame speed. The file records no PAL or NTSC either, so `--region` defaults to pal.
+Reported, not carried over: instrument vibrato, filter tables, wave tables that play chords, absolute notes, detune, or rows once before settling, pulse tables that zigzag or change width before setting one, the tempo table's programs
+(`$12`, `$15`) and every other pattern effect and small effect by name (slides, portamento, vibrato, set waveform, set sustain and so on), note-column vibrato, sync, ring, gate on, the orderlist's main volume, and a jump to another subtune;
+legato is played as a new note (said as approximate); a tuning other than 440 Hz is played at 440 Hz. A song with no key-off is not made to stop: the last note holds, as in the player.
+**Not verified:** no song saved by the real editor was read (the layout was checked against Hermit's own converter, section 4), nothing was compared with SID-Wizard by ear; that a tempo effect changes the row it is on (read from `player.asm`), how tempo programs are numbered (so effects `$12` and `$15` are reported, not played), that
+a repeat row (`$01-$0F` in the wave table) lasts one call more than its number (read from the player), and the 2-call delay at the start of a note (not modelled). Table programs were classified from the player source and hand-built files, not from real songs.
+Not built: the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
+the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
+
+**GoatTracker `.sng` export: built** (branch `gt-writer`). `chipsynth/formats/goattracker_export.py`, with the reader as its check (`tests/test_goattracker_export.py`):
+`python -m chipsynth export-song SOURCE[:SONG] -o OUT.sng [--region pal|ntsc] [--multispeed 1|2|4] [--gt-tempo exact|speed]` (pal by default, as the importer), and the composer's File > Export > GoatTracker 2.
+V1-V3 -> the three voices; notes, rests, key-offs, the loop point (a `once` song ends in a silent pattern that repeats, said in the Report), orders, patterns of a bar (shared when equal) and instruments with ADSR,
+waveform and pulse width. Arpeggio -> a looping wavetable (a frame a row, so steps are whole frames), pulse sweep -> a pulse table that ramps up and down (at most 127 a frame, so a fast wide sweep is narrowed),
+vibrato -> a relative speed table entry found by running the importer's own model (the player's cycles are whole frames, so only some rates and depths exist; the nearest is used and listed).
+Timing: rows of the coarsest grid (at most a sixteenth) that every note, loop and tempo change lies on; a row is at least 3 frames; row lengths come from the tempo rounded cumulatively, and where they are not all equal the speed is
+changed on the rows that differ (command F on voice 1), which is exact to half a frame; `--gt-tempo speed` writes one speed instead. At the native tempo (125 bpm PAL, 150 NTSC, any multispeed) notes and timing round trip tick for tick.
+Left out and reported: more voices, DACs, echo, reverb, detune, differences in note and instrument volume, pan, slides, the filter, the short noise mode; a sine is a triangle; the song is cut, and says so, past 208 patterns or 253 order entries.
+Two importer fixes came with it: the end of a song was found one frame late (the last note without a key-off was a frame too long), and an instrument's vibrato was lost on a row that had a tempo or other non-portamento command.
+**Not verified:** the files were read back by chipsynth's own importer only, never opened in a real GoatTracker; the tables and commands follow the same reading of `gplay.c` the importer does. In particular unchecked: that a tempo command takes effect on its own row (the groove depends on it; `--gt-tempo speed` does not),
+that wavetable right column `0x80` ("no change") and `0x00` (+0) behave as assumed, that relative notes cannot go below the note (an arpeggio below it is written lower and counted up), and the pulse speed range. Not built: the filter (as a filter table), slides (as portamento), volume (as sustain), stereo (two SIDs).
+Slice 3 was written without the player source in reach (`gplay.c` could not be fetched from the environment it was built in): the command descriptions come from GoatTracker's published command list,
+the table and frame behaviour from slice 2's reading of the player, and the rest from memory. **To check against `gplay.c`:** that a command (portamento, vibrato) stays in force until a later command or note
+(taken here: until the next note or a later row with a command); the speed table's 16-bit speed (left column as the high byte); the filter table row layout (`0x80`+type bits and resonance / voice mask, `0x00` set cutoff, `0x01`-`0x7f`
+time and signed speed); that a relative wavetable note wraps in 7 bits (`(note + right) & 0x7f`, so `0x7f` is one below); that a waveform row with the gate bit off or `0xe0`-`0xef` is silence or a release;
+what F00 / F01 recall; that one-shot commands (5xy - Fxy) leave the instrument's vibrato alone; the cutoff to Hz curve (30 Hz + 46 Hz a step); and that the pulse width before a table sets one is not kept from the note before.
+Filter and master volume are heard as chipsynth's per-note filter and per-note volume, not as the chip's.
+**FamiStudio import fidelity: expansion chips and table-driven instruments** (`fs-fidelity`). `famistudio_text.py` and `envelope.py`; tests in `tests/test_famistudio_fidelity.py`, built by hand.
+Files with no expansion chip and no instrument that needs it import exactly as before (the earlier tests pass unchanged).
+
+*Expansion chips.* A channel is imported only when its chip is in the project's `Expansions` (the channel names and envelope names are from `Channel.cs` / `Envelope.cs`, MIT, read only). Channels with notes take the voices after V1-V4, in this order:
+VRC6 (Square1, Square2, Saw), MMC5 (Square1, Square2), FDS, N163 (Wave1-8), S5B (Square1-3), EPSM squares; a song has 16 voices at most, so 12 fit, and the rest are reported ("no voice left"). Each track starts with a comment naming its FamiStudio channel.
+VRC6 pulses use the eight VRC6 duties (`(n+1)/16`), the VRC6 saw is `saw`, MMC5 pulses use the NES duties. S5B and EPSM squares are 50% pulses (their noise, hardware envelope and mixer are reported, not played).
+FDS and N163 waveforms (the first wave of the table) become the nearest of sine, triangle, saw or a pulse of any width (`envelope.fit_wave`: every phase and the inverted wave are tried, the error is the RMS difference of the two shapes at equal RMS), and every such instrument is reported as approximate with its error;
+FDS modulation, wave sequences and the VRC6 saw master volume are not played. Skipped and reported: VRC7, EPSM FM and rhythm, the MMC5 PCM channel.
+
+*Table-driven instruments.* An instrument is played as one note with the fitted `a d s r` as before when everything fits. When it does not (decision 2), each note is played a frame at a time: a short note wherever the pitch, volume or duty changes, on a flat instrument (`NAME_sim`, `_d0..` per duty):
+a volume envelope whose fit error is over `GOOD`, an arpeggio envelope that is not a repeating cycle of 8 steps or fewer, an arpeggio named by a note (`Arpeggio="..."`, which was ignored before), a duty envelope that is not a sweep, a noise-mode envelope, and a pitch envelope.
+The volume of a step is the envelope times the note's volume, rounded to 0-15 (exact); a volume envelope's release point goes on past the end of the note, up to the next note. Frame `f` starts `round(f x ticks per frame)` ticks into the note, so a step is within half a tick of its frame.
+The error is reported: the tick size of a frame, and the RMS and worst pitch rounding in semitones (a pitch envelope moves in less than a semitone, a chipsynth note cannot). A pitch envelope that is a small looping swing (under a semitone, measured on C4) is a vibrato (`vib`) instead, with its RMS error.
+When a frame is shorter than a tick (a tempo of about 30 bpm), nothing is simulated and the fit is used, with a report line.
+**Not verified:** FamiStudio's pitch envelope unit and sign were not found in the documentation or the source files that could be fetched; this assumes one unit is one step of the NES period register (16 per square cycle, 32 for the triangle, 14 for the VRC6 saw), positive is higher, and a relative envelope adds its value each frame and stops where a non-looping one ends.
+Pitch envelopes on the noise, FDS, N163, S5B and EPSM channels are still reported as left out (their units differ). Whether the VRC6 saw plays the octave its note name says, how FamiStudio holds the last value of an envelope without a loop, and that a note without a release point stops dead at its end, are taken from the existing importer and not checked against FamiStudio.
+Nothing was compared against FamiStudio's own playback or by ear; the check was that the rendered frames follow the envelope (a 15 / 5 envelope renders at about 2.9 : 1).
 Furnace `.fur` importer (branch `furnace-import`): `python -m chipsynth import PKG.csp FILE.fur [--song NAME|N] [--report FILE]` and composer File > Import. Formats 157 to 259 are read (Furnace 0.6pre5 and newer); versions 157 to 251 were checked against real modules, 252 to 259 only against the format document. Older files, newer files and `PATR` (pre-0.6 pattern) modules are refused with the reason. Chips imported: NES 2A03 (two pulses, triangle, noise, DPCM as `D1`), C64 SID (3 voices) and the two Game Boy pulse channels; every other chip, the Game Boy wave and noise channels and a SID's PCM channel are skipped and reported. One Furnace tick is 4 chipsynth ticks, so speed changes, alternating speeds and grooves keep their exact row lengths; tick-rate effects (`Cxxx`, `F0xx`) become `Tempo` events. Carried over: notes, off/release, ADSR, duty and pulse width, volume and arpeggio macros (through `fit_volume` and `fit_arpeggio`), `00xy` arpeggio, `EC`, `ED`, `12xx`, `0B`/`0D` jumps, `FF` stop, the loop point, and samples (hardware DPCM directly, PCM converted through `dpcm.convert_wav` and reported as approximate). Subsongs become songs of one package.
 Not built: `.dmf` (its format document could not be reached, so it is refused with a pointer to Furnace's File > Save as `.fur`); SID ring/sync/volume/cutoff macros and a relative duty macro; vibrato, portamento and the other pattern effects (listed as left out). Not verified: playback by ear; the NES noise note-to-period map, the triangle's octave and the SID filter mapping; 16-bit pattern channel numbers in versions 252 to 259. The tests use a module builder written from the same document, so a misreading shared by both would go unnoticed; real modules were parsed and compiled locally (396 files, no crashes) but are not committed.
