@@ -9,7 +9,7 @@
   build TEXT [-o PKG.csp]         assemble a package from a dump
   import PKG.csp FILE.mml ...     add songs (song id = file name, with `_` for anything an id may not hold) to a package, creating it if needed
                                   (FILE.mid works too; FILE.txt from FamiStudio's File > Export > FamiStudio Text works too;
-                                  so does a FamiStudio project FILE.fms (4.1 to 4.5); so does a GoatTracker 2 FILE.sng, and a SID Factory II FILE.sf2, and a SID-Wizard FILE.swm; a FILE.wav is added as a DAC sample: --rate R (index,
+                                  so does a FamiStudio project FILE.fms (4.1 to 4.5); so does a GoatTracker 2 FILE.sng, and a SID Factory II FILE.sf2, and a SID-Wizard FILE.swm, and a Furnace FILE.fur; a FILE.wav is added as a DAC sample: --rate R (index,
                                   Hz or auto, default 12) --channel mix|left|right|stereo --trim [DB] --no-normalize
                                   --gain DB --fade MS --max-seconds S --max-bytes N --truncate --no-fit; the result
                                   is reported: rate, length, bytes, clipping)
@@ -29,6 +29,7 @@
                                                   overrides what the file says, --report FILE)
                                                   (SID-Wizard: --song N is the subtune, --region pal|ntsc defaults to pal,
                                                   --report FILE; the file records its own frame speed)
+                                                  (Furnace .fur: NES, C64 SID and Game Boy pulse channels; --song N is the subsong, --report FILE)
   export PKG.csp [options]        components as MML: each song as ID.mml, the rest in lib/PACKAGE.mml, DPCM samples
                                   in samples/NAME.dpcm (a game's music folder).  Without --type: songs and the
                                   package's shared parts.
@@ -62,7 +63,7 @@ import sys
 from pathlib import Path
 
 from . import components as comp, dpcm, exporter, mml, midi, package as pk, packagetext
-from .formats import famistudio_binary, goattracker, sf2, sidwizard
+from .formats import famistudio_binary, furnace, goattracker, sf2, sidwizard
 from .packageset import PackageSet
 from .song import Song
 
@@ -190,13 +191,13 @@ def import_cmd(args):
                    help="(MIDI) DAC lanes for the percussion: auto (default) uses as many as the file's simultaneous hits need, "
                         "up to 8; a number 2-8 allows at most that many and hits that do not fit are reported")
     p.add_argument("--song", metavar="NAME", help="(FamiStudio) import only this song, by name or number; (GoatTracker) only this "
-                                                  "subtune, by number (default: every song)")
+                                                  "subtune, by number; (Furnace) only this subsong, by number or name (default: every song)")
     p.add_argument("--region", choices=("ntsc", "pal"), help="(FamiStudio) the timing to use (default: what the file says); "
                                                              "(GoatTracker, SID-Wizard) 50 Hz pal or 60 Hz ntsc (default pal: the file does not say); "
                                                              "(SID Factory II) overrides the PAL / NTSC the file records")
     p.add_argument("--multispeed", type=int, choices=(1, 2, 4), default=1,
                    help="(GoatTracker) frames the player runs for each video frame (default 1: the file does not say)")
-    p.add_argument("--report", metavar="FILE", help="(FamiStudio, GoatTracker, SID Factory II, SID-Wizard) also write what was changed or left out, as JSON")
+    p.add_argument("--report", metavar="FILE", help="(FamiStudio, GoatTracker, SID Factory II, SID-Wizard, Furnace) also write what was changed or left out, as JSON")
     wavg = p.add_argument_group("WAV samples", "a .wav file is added to the package as a DAC sample (named by --id, else by "
                                                "the file name); these options apply to .wav files only")
     dpcm.add_import_arguments(wavg, fit_default=True)
@@ -229,6 +230,12 @@ def import_cmd(args):
             continue
         if Path(f).suffix.lower() == ".swm" or sidwizard.looks_like(_head(f)):
             import_sidwizard(a, pkg, f, lib)
+            continue
+        if Path(f).suffix.lower() == ".dmf":
+            raise pk.PackageError("%s: DefleMask .dmf files are not read (the format's specification could not be checked); "
+                                  "open it in Furnace and save it as .fur, which is" % f)
+        if Path(f).suffix.lower() == ".fur" or furnace.looks_like(_head(f, 4096)):
+            import_furnace(a, pkg, f, lib)
             continue
         sid = a.id or pk.Package.safe_id(Path(f).stem)
         if sid in pkg.songs and a.no_replace:
@@ -275,10 +282,10 @@ def import_wav(a, pkg, f):
         print("  " + line)
 
 
-def _head(f):
+def _head(f, n=32):
     """The first bytes of a file (to tell a GoatTracker, SID Factory II or SID-Wizard song from MML by its start)."""
     with open(f, "rb") as fh:
-        return fh.read(32)
+        return fh.read(n)
 
 
 def import_goattracker(a, pkg, f, lib):
@@ -401,6 +408,33 @@ def import_sidwizard(a, pkg, f, lib):
             raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
         verb = "replaced" if sid in pkg.songs else "added"
         pkg.add_song(sid, imp.song, lib)
+        print("%s song '%s' from %s (%s)" % (verb, sid, f, imp.name))
+    for line in res.report.lines():
+        print("  " + line)
+    if a.report:
+        import json
+        Path(a.report).write_text(json.dumps(res.report.as_dict(), indent=2), encoding="utf-8")
+
+
+def import_furnace(a, pkg, f, lib):
+    data = Path(f).read_bytes()
+    if not furnace.looks_like(data):
+        raise pk.PackageError("%s is not a Furnace module (it should start with -Furnace module- or be zlib-compressed)" % f)
+    try:
+        res = furnace.load(data, song=a.song)
+    except furnace.FurnaceError as e:
+        raise pk.PackageError("%s: %s" % (f, e))
+    if a.id and len(res.songs) != 1:
+        raise pk.PackageError("--id needs one song: the file has %d subsongs (pick one with --song N)" % len(res.songs))
+    stem = pk.Package.safe_id(Path(f).stem)
+    for n, imp in enumerate(res.songs, 1):
+        sid = a.id or (stem if len(res.songs) == 1 else "%s_%s" % (stem, pk.Package.safe_id(imp.name, "song%d" % n)))
+        if sid in pkg.songs and a.no_replace:
+            raise pk.PackageError("the package already has a song '%s' (leave out --no-replace to replace it)" % sid)
+        verb = "replaced" if sid in pkg.songs else "added"
+        mem = dict(lib)
+        mem["_mem"] = {**lib.get("_mem", {}), **imp.samples}
+        pkg.add_song(sid, imp.song, mem)
         print("%s song '%s' from %s (%s)" % (verb, sid, f, imp.name))
     for line in res.report.lines():
         print("  " + line)
