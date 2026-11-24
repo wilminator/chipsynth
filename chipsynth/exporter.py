@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Michael Allen Wilmes
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mid, mml, csp, famistudio, famitracker or goattracker.
+"""Export one song of a package (or of a .mml file) in any format chipsynth writes: wav, mid, mml, csp, famistudio, famitracker, goattracker or sidwizard.
 (A plain .txt is FamiStudio's text format; FamiTracker's ends in .ftm.txt or is asked for with fmt="famitracker".)
 
     pkg = open_source("music/forest.csp")
@@ -27,8 +27,8 @@ from .player import TunePlayer
 from .song import Song
 from .synth import RATE, to_pcm16
 
-FORMATS = ("wav", "mid", "mml", "csp", "famistudio", "famitracker", "goattracker")
-SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp", ".txt": "famistudio", ".sng": "goattracker"}
+FORMATS = ("wav", "mid", "mml", "csp", "famistudio", "famitracker", "goattracker", "sidwizard", "furnace")
+SUFFIXES = {".wav": "wav", ".mid": "mid", ".midi": "mid", ".mml": "mml", ".csp": "csp", ".txt": "famistudio", ".sng": "goattracker", ".swm": "sidwizard", ".fur": "furnace"}
 
 
 FAMITRACKER_ENDING = ".ftm.txt"                  # a plain .txt is FamiStudio's own text format: this one is FamiTracker's
@@ -218,13 +218,14 @@ def format_of(path, fmt=None):
     return f
 
 
-def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region=None, multispeed=1, gt_tempo="exact"):
-    """Write song `song_id` of `pkg` to `path` as wav, mid, mml, csp, famistudio, famitracker or goattracker (see the module doc).  Returns a Result.
+def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region=None, multispeed=1, gt_tempo="exact", target=None):
+    """Write song `song_id` of `pkg` to `path` as wav, mid, mml, csp, famistudio, famitracker, goattracker, sidwizard or furnace (see the module doc).  Returns a Result.
     `region` is ntsc or pal for the two tracker formats (default: ntsc for FamiStudio, pal for GoatTracker, as its importer);
-    `multispeed` (1, 2, 4) and `gt_tempo` (exact or speed) are GoatTracker's."""
+    `multispeed` (1, 2, 4) and `gt_tempo` (exact or speed) are GoatTracker's and SID-Wizard's;
+    `target` (nes or sid, default nes) is the Furnace chip."""
     opts = opts or AudioOptions()
     fmt = format_of(path, fmt)
-    region = region or ("pal" if fmt == "goattracker" else "ntsc")
+    region = region or ("pal" if fmt in ("goattracker", "sidwizard") else "ntsc")
     song_id = pick_song(pkg, song_id)
     if fmt != "wav" and opts.used():
         raise ExportError("%s only applies to a wav, not a %s" % (", ".join("--" + k for k in opts.used()), fmt))
@@ -253,6 +254,28 @@ def export_song(pkg, song_id, path, opts=None, fmt=None, lib=None, region=None, 
                 data, rep = goattracker_export.dump(pkg.tune(song_id, lib), region, multispeed, name=song_id if not pkg.songs[song_id].title else None,
                                                     tempo=gt_tempo)
             except goattracker_export.GoatTrackerExportError as e:
+                raise ExportError(str(e))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            r.written = [path]
+            r.notes += rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
+        elif fmt == "sidwizard":
+            from .formats import sidwizard_export
+            try:
+                data, rep = sidwizard_export.dump(pkg.tune(song_id, lib), region, multispeed, name=song_id if not pkg.songs[song_id].title else None,
+                                                  tempo=gt_tempo)
+            except sidwizard_export.SidWizardExportError as e:
+                raise ExportError(str(e))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            r.written = [path]
+            r.notes += rep.notes + ["approximated: " + m for m in rep.approximated] + ["left out: " + m for m in rep.dropped]
+        elif fmt == "furnace":
+            from .formats import furnace_export
+            try:
+                data, rep = furnace_export.dump(pkg.tune(song_id, lib), target=target or "nes", region=region,
+                                                name=song_id if not pkg.songs[song_id].title else None)
+            except furnace_export.FurnaceExportError as e:
                 raise ExportError(str(e))
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)

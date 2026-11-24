@@ -320,9 +320,10 @@ class PulseTableTests(unittest.TestCase):
     def test_a_ramp_up_and_down_is_a_pulse_sweep(self):
         r, song = load(inst(pp=1), self.TRI)
         i = only(song)
-        self.assertEqual((i.pw, i.pws_from, i.pws_to, i.pws_rate), (50, 50, 74, 2))   # 50 frames a cycle = 1 Hz
+        # 50 table frames a cycle; the pulse table skips the first frame of each 6-frame row (default speed), so a cycle takes 60: 0.83 Hz
+        self.assertEqual((i.pw, i.pws_from, i.pws_to, i.pws_rate), (50, 50, 74, 2))
         self.assertNotIn("pulse sweep (", text(r))
-        self.assertNotIn("approximated", text(r))
+        self.assertIn("rounded to the nearest chipsynth rate", text(r))
 
     def test_a_sweep_that_starts_high_starts_there(self):
         t = [E, ([0x8C, 25, 25, 0xFF], [0x00, 0xD8, 0x28, 2]), E, E]
@@ -350,11 +351,11 @@ class PulseTableTests(unittest.TestCase):
         self.assertNotIn("pulse sweep", text(r))
 
     def test_a_zigzag_that_repeats_one_sweep_is_that_sweep(self):
-        # two identical rises and falls in the table are one sweep, exactly: 8 frames a cycle
+        # two identical rises and falls in the table are one sweep, exactly: 8 table frames a cycle, 9.6 on the clock (rows of 6)
         t = [E, ([0x88, 4, 4, 4, 4, 0xFF], [0x00, 0x10, 0xF0, 0x10, 0xF0, 2]), E, E]
         r, song = load(inst(pp=1), t)
         i = only(song)
-        self.assertEqual((i.pws_from, i.pws_to, i.pws_rate), (50, 52, 12))
+        self.assertEqual((i.pws_from, i.pws_to, i.pws_rate), (50, 52, 10))
         self.assertNotIn("approximated", text(r))
         self.assertNotIn("pulse sweep (", text(r))
 
@@ -458,12 +459,17 @@ class VibratoTests(unittest.TestCase):
         self.assertIn("without a new note", text(r))
 
 
-def held(ins, tables, cmd=0, data=0, note=C4, rows=8, extra=None, **kw):
+def held(ins, tables, cmd=0, data=0, note=C4, rows=8, extra=None, repeat=True, **kw):
     """One note on voice 1 held for `rows` rows (6 frames each) and then released.  `extra` puts a command on a later row:
-    {row: (command, data)}."""
+    {row: (command, data)}.  A portamento or vibrato command lasts for its own row only, so `repeat` (the default) writes it
+    on every row of the note, as a song has to (the player's command packing makes the repeats free)."""
     p = [(note, 1, cmd, data)] + [(gt.REST, 0, 0, 0)] * (rows - 1) + [(gt.KEYOFF, 0, 0, 0)]
-    for i, (c, d) in (extra or {}).items():
-        p[i] = (p[i][0], p[i][1], c, d)
+    c, d = cmd, data
+    for i in range(1, rows):
+        if i in (extra or {}):
+            c, d = extra[i]                       # a command from this row on (the rows after it repeat it)
+        if repeat:
+            p[i] = (p[i][0], p[i][1], c, d)
     r = gt.load(sng([[0, gt.LOOPSONG, 0]] * 3, [pat(*p)], ins, tables), **kw)
     return r, r.songs[0].song
 
@@ -488,14 +494,23 @@ class PortamentoTests(unittest.TestCase):
     def test_portamento_up_glides_to_the_pitch_it_reaches(self):
         # 64 units a frame for 47 frames from C4 (4455) is 9.1 semitones: A4, and the note says how long the glide takes
         r, song = held(inst(), SPEEDS, cmd=1, data=1)
-        self.assertEqual(played(song), [(48, 4, "x", 0), (57, 188, "x", 94)])
+        self.assertEqual(played(song), [(48, 4, "x", 0), (56, 188, "x", 94)])
         self.assertIn("nearest semitone", text(r))
         self.assertNotIn("left out", text(r))
         assert_valid(self, song)
 
+    def test_a_portamento_lasts_for_its_own_row_only(self):
+        # checked against GoatTracker's player: the command is not kept by the next row (a cmd 0 or a row without one ends it)
+        r, song = held(inst(), SPEEDS, cmd=1, data=1, repeat=False)
+        notes = played(song)
+        self.assertEqual(notes[0][0], 48)
+        self.assertLess(max(n[0] for n in notes), 52)          # one row of glide (6 frames), not 47 frames of it
+        r2, song2 = held(inst(), SPEEDS, cmd=1, data=1)
+        self.assertGreater(max(n[0] for n in played(song2)), 52)
+
     def test_portamento_down(self):
         r, song = held(inst(), SPEEDS, cmd=2, data=1)
-        self.assertEqual(played(song), [(48, 4, "x", 0), (28, 188, "x", 94)])
+        self.assertEqual(played(song), [(48, 4, "x", 0), (33, 188, "x", 94)])
         assert_valid(self, song)
 
     def test_a_slow_slide_is_a_semitone(self):
@@ -505,7 +520,7 @@ class PortamentoTests(unittest.TestCase):
     def test_multispeed_makes_the_slide_faster(self):
         # the same units a frame, twice the frames a second
         r, song = held(inst(), SPEEDS, cmd=1, data=1, multispeed=2)
-        self.assertEqual(played(song), [(48, 2, "x", 0), (63, 190, "x", 95)])
+        self.assertEqual(played(song), [(48, 2, "x", 0), (62, 190, "x", 95)])
 
     def test_a_long_slide_is_cut_into_notes_chipsynth_can_glide(self):
         r, song = held(inst(), SPEEDS, cmd=1, data=1, rows=80)
@@ -521,12 +536,12 @@ class PortamentoTests(unittest.TestCase):
     def test_a_slide_that_is_stopped_leaves_the_pitch_where_it_got_to(self):
         r, song = held(inst(), SPEEDS, cmd=1, data=1, extra={3: (1, 0)})
         notes = played(song)
-        self.assertEqual([(n[0], n[1], n[3]) for n in notes], [(48, 4, 0), (52, 68, 34), (52, 120, 0)])
+        self.assertEqual([(n[0], n[1], n[3]) for n in notes], [(48, 4, 0), (51, 68, 34), (51, 120, 0)])
 
     def test_a_new_speed_part_way_changes_the_slide(self):
         r, song = held(inst(), SPEEDS, cmd=1, data=1, extra={4: (1, 2)})
         notes = played(song)
-        self.assertEqual([n[0] for n in notes], [48, 53, 53])
+        self.assertEqual([n[0] for n in notes], [48, 52, 53])
         self.assertEqual(sum(n[1] for n in notes), 192)
 
     def test_a_missing_speed_entry_is_reported_and_the_note_plays_plain(self):
