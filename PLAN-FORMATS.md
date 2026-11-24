@@ -13,7 +13,7 @@ It builds on the command line from PR #1 (`import`, `export-song`, `components.p
 | SID Factory II (`.sf2`) | Skip a native format; reach it through GoatTracker | a driver-defined C64 memory image, no spec found; it already imports GoatTracker `.sng` |
 | Furnace (`.fur`) | Third, optional, large | one format covers SID *and* the NES (and more); actively developed; but version-gated, with per-chip instrument types |
 | CheeseCutter (`.ct`) | Skip for now | no format spec found; reachable through SID Factory II |
-| **SID-Wizard** (`.swm`) | **Import built** (section 4) | the spec ships in the release (`SWM-spec.src`) and the source is WTF-licensed; the player source settles the rest |
+| **SID-Wizard** (`.swm`) | **Import and export built** (sections 4 and 9) | the spec ships in the release (`SWM-spec.src`) and the source is WTF-licensed; the player source settles the rest |
 
 Nothing here maps exactly. chipsynth's `Instrument` is a static recipe (waveform, ADSR, vibrato, arpeggio, pulse sweep,
 filter sweep); trackers drive instruments with *per-frame programs* (envelopes, tables). Every import is an approximation
@@ -411,6 +411,26 @@ legato is played as a new note (said as approximate); a tuning other than 440 Hz
 a repeat row (`$01-$0F` in the wave table) lasts one call more than its number (read from the player), and the 2-call delay at the start of a note (not modelled). Table programs were classified from the player source and hand-built files, not from real songs.
 Not built: the rest of the pattern commands and the filter tables; SID-Wizard (`.swm`), SID Factory II (`.sf2`) and Furnace (`.fur`) importers. Not verified: whether a tempo command takes effect on its own row or the next one (the player reads rows ahead of the gate timer);
 the tables were checked against the player's source and against hand-built files, not against real songs or by ear.
+
+**SID-Wizard `.swm` export: built** (branch `sidwizard-export`). `chipsynth/formats/sidwizard_export.py`, `dump(tune, region="pal", multispeed=1, name=None, tempo="exact") -> (bytes, Report)`, shaped like the GoatTracker writer
+(`tests/test_sidwizard_export.py`, `tests/test_composer_sidwizard_export.py`). V1-V3 are the three SID voices; V4 and up, the DACs, echo, reverb, loudness, pan, slides, detune and the filter are left out and said. Notes, rests, gate-offs
+(`$7E`), the tempo and the loop point are kept: the orderlists end in `FF position` (or `FE` for a `once` song, with a short silent last pattern, because the player eats the last row before an `FE`). Per instrument: ADSR (with the
+player's hard restart), waveform, pulse width, a pulse sweep as a pulse table (up, down, jump back), an arpeggio as a wave table, and vibrato as the instrument's calculated-vibrato byte (the nearest amplitude and period the player's exponent table makes;
+the fit and the difference from chipsynth's sine are reported). The tempo is a number of video frames a row (3 or more); `exact` writes the `$10` tempo effect on the rows that need it, `speed` one tempo. From the command line and the composer:
+
+    python -m chipsynth export-song music/forest.csp:dawn -o dawn.swm --region pal
+    python -m chipsynth import music/back.csp dawn.swm --region pal
+
+File > Export > SID-Wizard asks PAL or NTSC, the multispeed and the tempo mode. Limits (all reported when hit): 100 patterns, 36 instruments, 124 orderlist entries, 248 bytes a pattern, notes C-0 to A#7 (others move by octaves).
+**Verified** against the format author's own sources, read only and never copied (`anarkiwi/sid-wizard` 1.97 and `anarkiwi/pysidwizard` 0.7.0, cloned outside the repository): (1) the real 6502 player (the one in pysidwizard's `SWMPlayer`)
+was run on written files for a battery of random songs and its register log compared with the exported notes: every gate-on lands on the row's frame plus the player's 2-frame start delay, at each tempo, loop and `once` ending; the frequency table
+(`FREQ`) is the player's register for every note 0-94 to within 1 unit; the vibrato swing and the pulse sweeps match the model; (2) Hermit's `SWMconvert` (compiled locally, SWM to MIDI) reads the files and gives the same notes for songs at the native tempo
+(it ignores the `$10` effect, so only those); (3) `pysidwizard.parse_swm` reads them and `build_swm` rebuilds the identical bytes. **Not verified:** that the SID-Wizard editor opens a written file (it is not available here);
+that audio sounds right (no SID chip emulation render was compared, only register logs), the NTSC pitch table (the file has no region), and the drops (filter, volume, loudness).
+**Finding (not fixed, the importer is unchanged):** a frame speed of N makes only the instrument tables (wave/arpeggio, and the pulse table when the instrument asks) run N times a video frame; the sequencer and vibrato run once. So `--multispeed` here
+means faster tables at the same row lengths, and `export` keeps tempos in video frames. The importer (`formats/sidwizard.py`) takes the tempo as player calls (`4/N` ticks a call), which is only right for N = 1: a file at N = 2 or 4 is read at the wrong speed
+(the exporter's tests therefore do not read back multispeed files). The importer also plays a loop round many times for some files written at a non-native tempo (the channels then seem to loop at different lengths in its simulation; the cause was not tracked down), and drops vibrato; such a round trip
+shows the first pass correct and repeats after it, so the tests compare the first pass only.
 
 **GoatTracker `.sng` export: built** (branch `gt-writer`). `chipsynth/formats/goattracker_export.py`, with the reader as its check (`tests/test_goattracker_export.py`):
 `python -m chipsynth export-song SOURCE[:SONG] -o OUT.sng [--region pal|ntsc] [--multispeed 1|2|4] [--gt-tempo exact|speed]` (pal by default, as the importer), and the composer's File > Export > GoatTracker 2.
