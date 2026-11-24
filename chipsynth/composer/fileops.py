@@ -35,6 +35,7 @@ EXPORTS = {
     "famistudio": ("FamiStudio text (.txt)...", "Export FamiStudio text", "*.txt", ".txt"),
     "goattracker": ("GoatTracker 2 (.sng)...", "Export GoatTracker song", "*.sng", ".sng"),
     "famitracker": ("FamiTracker text (.ftm.txt)...", "Export FamiTracker text", "*.txt", ".ftm.txt"),
+    "furnace": ("Furnace module (.fur)...", "Export Furnace module", "*.fur", ".fur"),
     "csp": ("Package copy (.csp)...", "Export a one-song package", "*.csp", ".csp"),
 }
 
