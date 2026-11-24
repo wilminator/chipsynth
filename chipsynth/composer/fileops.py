@@ -36,6 +36,7 @@ EXPORTS = {
     "goattracker": ("GoatTracker 2 (.sng)...", "Export GoatTracker song", "*.sng", ".sng"),
     "sidwizard": ("SID-Wizard (.swm)...", "Export SID-Wizard song", "*.swm", ".swm"),
     "famitracker": ("FamiTracker text (.ftm.txt)...", "Export FamiTracker text", "*.txt", ".ftm.txt"),
+    "furnace": ("Furnace module (.fur)...", "Export Furnace module", "*.fur", ".fur"),
     "csp": ("Package copy (.csp)...", "Export a one-song package", "*.csp", ".csp"),
 }
 

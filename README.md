@@ -31,7 +31,7 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `mml.py` | the tune language: parser, `Tune`, `Note`, the instrument / pattern / effect / scale / sample library |
 | `synth.py`, `synthfx.py` | the voices, envelopes, effects, filter; the shared echo and reverb bus |
 | `dpcm.py` | WAV to NES-style delta samples, the `.dpcm` file format (`python -m chipsynth.dpcm demo|convert`) |
-| `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report (expansion channels land on V5 and up); `formats.goattracker.load(bytes)` and `formats.sf2.load(bytes)` and `formats.sidwizard.load(bytes)` likewise; the writers are `formats.famistudio_export.dump(tune)` and `formats.goattracker_export.dump(tune)` and `formats.sidwizard_export.dump(tune)` and `formats.famitracker_export.dump(tune)` -> file, report |
+| `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report (expansion channels land on V5 and up); `formats.goattracker.load(bytes)` and `formats.sf2.load(bytes)` and `formats.sidwizard.load(bytes)` likewise; the writers are `formats.famistudio_export.dump(tune)` and `formats.goattracker_export.dump(tune)` and `formats.sidwizard_export.dump(tune)` and `formats.furnace_export.dump(tune, target="nes"|"sid", region=)` and `formats.famitracker_export.dump(tune)` -> file, report |
 | `midi.py` | Standard MIDI files: `to_midi(tune)`, `from_midi(bytes, voices=None, drum_lanes="auto")` -> Song (a voice per part, up to 16; `voices=N` folds the rest into gaps; channel 10 drums go to D1 / D2, and to D3-D8 when hits fall together) |
 | `songedit.py` | `Editor`: note-level edits of a Song (add, erase, pitch, resize, move) with undo / redo |
 | `song.py`, `songmml.py` | the `Song` model (clips, repeats, calls kept as objects), `Song.compile()` to a `Tune`, MML import / export: `Song.from_mml(text)`, `song.to_mml()` |
@@ -161,7 +161,7 @@ What a conversion approximated or left out is never silent: the status line coun
 every line (a clean conversion needs no window). Dropping a `.sng`, `.sf2`, `.swm`, `.txt`, `.fms` or `.wav` on the window imports it too.
 
 * **WAV** export asks for the trips round the loop, normalizing to -1 dBFS, and the whole song or just the selected notes;
-  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL (no Version is written; see "FamiStudio versions" below); **FamiTracker** export asks NTSC or PAL; **GoatTracker** and **SID-Wizard** export ask PAL or NTSC, the multispeed and the tempo mode (see below); **GoatTracker** import asks the region
+  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL (no Version is written; see "FamiStudio versions" below); **FamiTracker** export asks NTSC or PAL; **GoatTracker** and **SID-Wizard** export ask PAL or NTSC, the multispeed and the tempo mode (see below); **Furnace** export asks the chip (NES or C64 SID) and NTSC or PAL (see below); **GoatTracker** import asks the region
   (the file does not record it), the multispeed and which subtune; a FamiStudio or Furnace file with several songs asks which; **SID Factory II** import asks the timing (as the file says, NTSC or PAL) and which song; a **SID-Wizard** import asks the region and the subtune (the file records its own frame speed).
 * **One song** from a FamiStudio, Furnace, GoatTracker or SID-Wizard file opens as a new unsaved song (Save asks where to put it), like a
   MIDI file. **Several songs** are written into a `.csp` package as `import` does: the open song's package when it has
@@ -242,7 +242,7 @@ and `COMMAND -h` give every option.
 | `import PKG.csp FILE.mml...` | add songs to a package (created if missing). `--id NAME` names the song, `--shared` adds a library file's instruments / fx / scales / samples to the package, `--no-replace` refuses an id already there, `--lib DIR` / `--samples DIR` say where a game's `music/lib` and `.dpcm` files are. `.mid` files work too, and so do FamiStudio text files (`.txt`, from File > Export > FamiStudio Text; `--song NAME`, `--region ntsc|pal`, `--report FILE`) and FamiStudio projects (`.fms`, formats 15 to 19 = FamiStudio 4.1 to 4.5, same options), and so do GoatTracker 2 songs (`.sng`; `--song N` is the subtune, `--region pal|ntsc` defaults to pal, `--multispeed 1|2|4`, `--report FILE`: the file records none of these; the pattern commands, wavetables, pulse tables and the filter are carried over where chipsynth can play them, and the report lists what is approximated or left out), and SID Factory II songs (`.sf2`; `--song N` is the song, `--region pal|ntsc` overrides the PAL / NTSC the file records, `--report FILE`), and SID-Wizard songs (`.swm`; `--song N`, `--region pal|ntsc` (default pal: the file does not say), `--report FILE`), and Furnace modules (`.fur`; `--song NAME|N` picks a subsong, `--report FILE`: NES, C64 SID and Game Boy pulse channels) |
 | `list SOURCE...` | the components of `.csp` / `.mml` / folders: `--type song,sample,...` (aliases `instr`, `key`), `--name 'd*'` (a glob; `TYPE:NAME` for one type) |
 | `export PKG.csp` | components as MML: `-d DIR` (songs as `ID.mml`, the rest in `lib/PACKAGE.mml`, samples in `samples/NAME.dpcm`, which is a game's `music/` layout), or `-o FILE` (`-` for stdout) for one thing; `--type` / `--name` choose; `--midi` writes songs as `.mid`. With no `--type`: songs and the shared parts |
-| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml`, `csp`, `famistudio` (`.txt`), `famitracker` (`.ftm.txt`; a plain `.txt` is `famistudio`, so a FamiTracker file ends in `.ftm.txt` or needs `-f famitracker`) or `goattracker` (`.sng`) (from OUT's ending, or `-f`). `render` is the same command. FamiStudio: `--region ntsc|pal`. GoatTracker: V1-V3 only; `--region pal|ntsc` (default pal, as the importer), `--multispeed 1|2|4`, `--gt-tempo exact|speed`; what it left out or approximated is printed |
+| `export-song SOURCE[:SONG] [SONG] -o OUT` | one song as `wav`, `mid`, `mml`, `csp`, `famistudio` (`.txt`), `famitracker` (`.ftm.txt`; a plain `.txt` is `famistudio`, so a FamiTracker file ends in `.ftm.txt` or needs `-f famitracker`) `goattracker` (`.sng`) or `furnace` (`.fur`; `--target nes|sid`, default nes; `--region ntsc|pal`) (from OUT's ending, or `-f`). `render` is the same command. FamiStudio: `--region ntsc|pal`. GoatTracker: V1-V3 only; `--region pal|ntsc` (default pal, as the importer), `--multispeed 1|2|4`, `--gt-tempo exact|speed`; what it left out or approximated is printed |
 | `generate`, `dump`, `build` | as before |
 
 `export-song` options for a **WAV** (any of them with another format is an error):
@@ -271,6 +271,18 @@ vibrato, slide, pan, tempo changes, voices past V4, DACs past D1 and the release
 A song exported as MML (`export`, or `export-song -f mml`) declares the package samples it plays under `[sample]` and writes
 them as `samples/NAME.dpcm` beside it; import it with `--samples samples` to get the same package back. In Python the same
 work is `components.py` (`components`, `select`, `export_mml`, `import_mml`) and `exporter.py` (`export_song`, `AudioOptions`).
+
+A song exported as a **Furnace module** (`-f furnace`, or a name ending in `.fur`) is written as format version 228, which Furnace 0.6.8.1 and
+every later release opens (Furnace refuses a module newer than itself, so the oldest release that has the format is the safest to write). `--target nes`
+(the default) writes the 2A03: V1, V2 -> the pulses, V3 -> the triangle, V4 -> the noise, D1 -> DPCM with its samples. `--target sid` writes the C64's
+three voices (6581), V1-V3, and leaves the rest out. `--region ntsc|pal` sets the tick rate (60 or 50 Hz) and the chip's clock. The ADSR is a volume
+macro on the NES (a SID keeps its own hardware envelope), the pulse width a duty macro (a SID gets a 12-bit duty), and arpeggio and vibrato macros carry
+the arpeggio and the vibrato; a tempo that is not a whole number of frames a row is a groove, a tempo change a new speed, and the loop is a jump
+(`once` songs stop). Echo, reverb, pan, slides, the SID filter sweep (a static filter is written, and it is shared by the three voices) and voices the
+chip lacks are left out or approximated, and every change is printed:
+
+    python -m chipsynth export-song music/forest.csp:dawn -o dawn.fur --target nes --region ntsc
+    python -m chipsynth export-song music/forest.csp:dawn -o dawn_sid.fur --target sid --region pal
 
 A song exported as **GoatTracker 2** keeps V1-V3 as the three SID voices, with notes, rests, key-offs, the loop point and the tempo,
 and each instrument's ADSR, waveform and pulse width; an arpeggio, a pulse-width sweep and vibrato become a wavetable, a pulse

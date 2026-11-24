@@ -42,6 +42,7 @@
                                   V1-V4 and D1 only; --region ntsc|pal; no Version is written; what it left out is printed) or
                                   goattracker (a .sng GoatTracker 2 opens: V1-V3 only; --region pal|ntsc (default pal),
                                   --multispeed 1|2|4, --gt-tempo exact|speed; what it left out is printed) or
+                                  furnace (a .fur Furnace 0.6.8 opens, format 228: --target nes|sid (default nes), --region ntsc|pal; what it left out is printed)
                                   sidwizard (a .swm SID-Wizard 1.x opens: V1-V3 only; same options as goattracker)
                                   (from OUT's ending, or --format)
                                     wav only: --volume V (0.5, 50%, -6dB)  --normalize [--peak DB, default -1]
@@ -534,7 +535,7 @@ def export_cmd(args):
 
 
 def export_song_cmd(args):
-    p = parser("export-song", "Export one song as wav, mid, mml, csp, famistudio, famitracker, goattracker or sidwizard.  Options marked (wav) apply to a wav only.")
+    p = parser("export-song", "Export one song as wav, mid, mml, csp, famistudio, famitracker, goattracker, sidwizard or furnace.  Options marked (wav) apply to a wav only.")
     p.add_argument("source", metavar="SOURCE[:SONG]", help="a .csp or .mml; SOURCE:SONG picks a song of a package")
     p.add_argument("song", nargs="?", metavar="SONG", help="the song id (not needed when there is only one)")
     p.add_argument("-o", "--output", metavar="OUT", required=True, help="the file to write")
@@ -546,8 +547,9 @@ def export_song_cmd(args):
     p.add_argument("--end", metavar="T", help="(wav) where to stop (default: the end of the song and its tail)")
     p.add_argument("--loops", type=int, default=0, metavar="N", help="(wav) trips round the loop after the first pass")
     p.add_argument("--tail", type=float, default=2.0, metavar="S", help="(wav) seconds to let the last notes ring (default 2)")
-    p.add_argument("--region", choices=("ntsc", "pal"), help="(famistudio, famitracker, goattracker, sidwizard) the frame rate the file is timed for "
+    p.add_argument("--region", choices=("ntsc", "pal"), help="(famistudio, famitracker, goattracker, sidwizard, furnace) the frame rate the file is timed for "
                                                              "(default ntsc for famistudio, pal for goattracker and sidwizard: the importers' default)")
+    p.add_argument("--target", choices=("nes", "sid"), help="(furnace) the chip to write for: nes (V1-V4 and D1, the default) or sid (V1-V3)")
     p.add_argument("--multispeed", type=int, choices=(1, 2, 4), default=1,
                    help="(goattracker) player frames for each video frame (default 1; 2 or 4 make rows longer in frames, for fast songs); "
                         "(sidwizard) how many times a video frame the instrument tables run (rows stay in video frames)")
@@ -564,7 +566,7 @@ def export_song_cmd(args):
     opts = exporter.AudioOptions(volume=exporter.gain(a.volume), normalize=a.normalize, peak_db=exporter.decibels(a.peak),
                                  start=exporter.frames(a.start), end=exporter.frames(a.end) if a.end else None,
                                  loops=a.loops, tail=a.tail)
-    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib, a.region, a.multispeed, a.gt_tempo)
+    r = exporter.export_song(pkg, a.song or song, a.output, opts, a.format, lib, a.region, a.multispeed, a.gt_tempo, a.target)
     for w in r.written:
         print("wrote", w, *(["(%.2fs, peak %s)" % (r.seconds, "silent" if r.peak_db is None else "%.1f dBFS" % r.peak_db)]
                             if r.format == "wav" and w == r.path else []))
