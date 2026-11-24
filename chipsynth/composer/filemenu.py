@@ -446,6 +446,14 @@ class FileMenu:
                               ok="Choose file...", note="Furnace 0.6.8 and later open it; the voices the chip lacks are left out and reported.",
                               apply=lambda v: self.export_choose(fmt, **v))
             return True
+        if fmt == "sidwizard":
+            self.show_options("Export SID-Wizard song",
+                              [("region", "Timing", [("pal", "PAL (50 Hz)"), ("ntsc", "NTSC (60 Hz)")], 0),
+                               ("multispeed", "Multispeed", [(1, "x1"), (2, "x2"), (4, "x4")], 0),
+                               ("gt_tempo", "Tempo", [("exact", "exact (tempo changes where needed)"), ("speed", "one tempo")], 0)],
+                              ok="Choose file...", note="V1-V3 only; the file does not record PAL or NTSC, so play it with the same; what is left out is reported.",
+                              apply=lambda v: self.export_choose(fmt, **v))
+            return True
         return self.export_choose(fmt)
 
     def export_choose(self, fmt, **opts):
@@ -464,7 +472,7 @@ class FileMenu:
 
     def export_as(self, fmt, path, loops=0, normalize=False, part="song", region=None, multispeed=1, gt_tempo="exact",
                   target=None):
-        """Write the open song to `path` as wav, mid, mml, famistudio, famitracker, goattracker, furnace or csp with exporter.export_song, the code
+        """Write the open song to `path` as wav, mid, mml, famistudio, famitracker, goattracker, sidwizard, furnace or csp with exporter.export_song, the code
         `python -m chipsynth export-song` runs.  A file it replaces is copied to backups first.  Returns True."""
         if self.song is None:
             self.say("There is no song to export.", 3.0)
@@ -491,7 +499,7 @@ class FileMenu:
             self.say("Can't export %s: %s" % (path.name, e), 8.0)
             return False
         lines = list(r.notes)
-        if fmt not in ("famistudio", "famitracker", "goattracker", "furnace"):     # only the tracker formats' notes include plain facts
+        if fmt not in ("famistudio", "famitracker", "goattracker", "sidwizard", "furnace"):     # only the tracker formats' notes include plain facts
             lines = ["warning: " + x for x in lines]
         else:
             lines = [x if x.startswith(WARNING) else "note: " + x for x in lines]

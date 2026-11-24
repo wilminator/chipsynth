@@ -27,11 +27,12 @@ from types import SimpleNamespace
 from . import goattracker as gt
 from .report import Report
 
-MIN_ROW = 3                  # frames: the gate timer (2) plus one
+MIN_ROW = 3                  # frames: the gate timer (1) plus the waveform frame plus one audible frame
 MAX_ROW = 127                # the largest speed a tempo command can set
 MAX_ORDER = 253              # patterns in an order list (the list also holds the loop byte and its position)
 MAX_PATTERNS, MAX_INSTRUMENTS, MAX_TABLE, MAX_PATTERN_ROWS = 208, 63, 255, 127
-GATE_TIMER, FIRST_WAVE = 0x02, 0x09
+FIRST_WAVE = 0x09
+SLOW_ROW = 6                 # rows shorter than this get the gate timer 1 instead of 2 (an audible frame or two less is too much)
 MAX_NOTE = gt.LASTNOTE - gt.FIRSTNOTE
 WAVES = {"pulse": 0x41, "saw": 0x21, "tri": 0x11, "noise": 0x81, "sine": 0x11}
 VIB_NOTE = 48                # the note a vibrato entry is fitted at (the entries are relative, so any will do)
@@ -111,6 +112,7 @@ class _Writer:
         self.by_key = {}
         self.vib_cache = {}
         self.moved = 0
+        self.gate = 2
 
     # ------------------------------------------------------------------ time
     def breaks(self):
@@ -177,15 +179,17 @@ class _Writer:
     def label_of(self, inst):
         return self.names.get(tuple(vars(inst).items()))
 
-    def gt_instrument(self, inst):
-        """The index (1-based) of the GoatTracker instrument for a chipsynth one."""
+    def gt_instrument(self, inst, bpm=None):
+        """The index (1-based) of the GoatTracker instrument for a chipsynth one.  `bpm` is the tempo its note starts at:
+        an arpeggio runs in steps of a beat, so the same instrument at another tempo needs another wavetable."""
         pulse = inst.wave == "pulse"
         arp = tuple(int(a) for a in inst.arp)
         sweep = pulse and inst.pws_rate and inst.pws_from and inst.pws_to and inst.pws_from != inst.pws_to
         vib = (inst.vib_rate, inst.vib_depth) if inst.vib_rate and inst.vib_depth else (0, 0)
+        bpm = bpm or self.t.bpm
         key = (inst.wave if inst.wave in WAVES else "pulse", inst.pw if pulse and not sweep else 0, inst.a & 15, inst.d & 15,
                inst.s & 15, inst.r & 15, arp, inst.arprate if arp else 0,
-               vib, (inst.pws_from, inst.pws_to, inst.pws_rate) if sweep else (0, 0, 0))
+               vib, (inst.pws_from, inst.pws_to, inst.pws_rate) if sweep else (0, 0, 0), bpm if arp and any(arp) else 0)
         if key in self.by_key:
             return self.by_key[key]
         base = _ident(self.label_of(inst) or "inst%d" % (len(self.instruments) + 1))[:15]
@@ -203,10 +207,10 @@ class _Writer:
         self.instruments.append(ins)
         idx = len(self.instruments)
         self.by_key[key] = idx
-        self.build(ins, name, inst, sweep, arp, vib)
+        self.build(ins, name, inst, sweep, arp, vib, bpm)
         return idx
 
-    def build(self, ins, label, inst, sweep, arp, vib):
+    def build(self, ins, label, inst, sweep, arp, vib, bpm):
         r = self.r
         wave = WAVES.get(inst.wave)
         if wave is None:
@@ -220,21 +224,30 @@ class _Writer:
         shift = min(0, min(arp)) if arp else 0
         steps = None
         if arp and any(arp):
-            fpb = 60.0 / self.t.bpm * self.fps
-            steps = max(1, int(round(fpb / max(1, inst.arprate))))
-            if abs(steps - fpb / max(1, inst.arprate)) > 0.1 * fpb / max(1, inst.arprate):
-                r.approx("instrument '%s': an arpeggio of %d steps a beat is played at %d frames a step (whole frames only)" % (label, inst.arprate, steps))
-            program = [(wave, (a - shift) & 0x7F) for a in arp for _ in range(steps)] + [(0xFF, 1)]
+            fpb = 60.0 / bpm * self.fps
+            raw = fpb / max(1, inst.arprate)
+            step = max(1.0, raw)
+            if abs(round(step) - step) <= 0.1 * step:
+                frames = [int(round(step))] * len(arp)                  # a whole number of frames, near enough
+            else:
+                frames = self.arp_frames(step, len(arp))                # steps of different lengths that add up right
+            if raw < 1.0 - 1e-9:
+                r.approx("instrument '%s': an arpeggio of %d steps a beat is faster than a frame a step: it is played at a frame a step" % (label, inst.arprate))
+            elif abs(frames[0] - step) > 1e-9 or len(set(frames)) > 1:
+                r.approx("instrument '%s': an arpeggio of %d steps a beat is played at %s frames a step (whole frames only)" % (
+                    label, inst.arprate, "%d" % frames[0] if len(set(frames)) == 1 else "%d and %d" % (min(frames), max(frames))))
+            steps = len(frames)
+            program = [(wave, (a - shift) & 0x7F) for a, n in zip(list(arp) * (len(frames) // len(arp)), frames) for _ in range(n)] + [(0xFF, 1)]
             if shift:
                 r.approx("instrument '%s': the arpeggio goes below the note (relative notes only go up): the notes are written %d semitones lower and the arpeggio counts from there" % (label, -shift))
         else:
-            program = [(wave, 0x80), (0xFF, 0)]
+            program = [(wave, 0x00), (0xFF, 0)]
             shift = 0
         wp = self.tables[gt.WTBL].add(program)
         if wp is None and steps:
             r.drop("instrument '%s': its arpeggio (the wavetable is full: %d rows)" % (label, MAX_TABLE))
             shift = 0
-            wp = self.tables[gt.WTBL].add([(wave, 0x80), (0xFF, 0)])
+            wp = self.tables[gt.WTBL].add([(wave, 0x00), (0xFF, 0)])
         if wp is None:
             r.drop("instrument '%s': the wavetable is full, so the instrument has none and will be silent" % label)
             wp = 0
@@ -252,6 +265,22 @@ class _Writer:
                 r.approx("instrument '%s': the arpeggio sets the pitch on every frame, which GoatTracker may play over the vibrato" % label)
         ins.ptr, ins.vibdelay = (wp, pp, 0, sp), vd
 
+    @staticmethod
+    def arp_frames(step, count):
+        """Whole frames for each step of an arpeggio of `count` notes whose steps last `step` frames: the shortest run of
+        cycles after which the rounded steps add up to the exact time (so the speed is right on average)."""
+        best = None
+        for k in range(1, 13):
+            err = abs(step * count * k - round(step * count * k))
+            if best is None or err < best[0] - 1e-9:
+                best = (err, k)
+            if err < 0.05:
+                break
+        k = best[1]
+        n = count * k
+        edges = [int(math.floor(step * j + 0.5 + 1e-9)) for j in range(n + 1)]
+        return [max(1, edges[j + 1] - edges[j]) for j in range(n)]
+
     def pulse_table(self, label, inst, sweep):
         r = self.r
         width = lambda pc: max(1, min(4095, int(round(pc * 4096 / 100.0))))
@@ -259,10 +288,9 @@ class _Writer:
             w = width(inst.pw)
             return self.tables[gt.PTBL].add([(0x80 | (w >> 8), w & 0xFF), (0xFF, 0)]) or self._pulse_full(label)
         a, b = width(inst.pws_from), width(inst.pws_to)
-        half = max(1, round(self.fps / max(1, inst.pws_rate)))
-        want = [h for h in range(1, 400) if round(self.fps / h) == inst.pws_rate]
-        if want:
-            half = min(want, key=lambda h: abs(h - self.fps / inst.pws_rate))
+        # the pulse table does not run on the first frame of a row, so a half sweep of `wall` frames is `wall` * (row - 1) / row table steps
+        wall = self.fps / max(1, inst.pws_rate)
+        half = max(1, int(round(wall / self.timing.stall())))
         step = int(round((b - a) / half))
         if abs(step) > 127:
             step = 127 if step > 0 else -127
@@ -282,8 +310,9 @@ class _Writer:
         if got is None:
             r.drop("instrument '%s': its pulse sweep (the pulse table is full)" % label)
             return self.tables[gt.PTBL].add([(0x80 | (a >> 8), a & 0xFF), (0xFF, 0)]) or 0
-        if round(self.fps / half) != inst.pws_rate:
-            r.approx("instrument '%s': the pulse sweep speed %d is played as %d (whole frames only)" % (label, inst.pws_rate, round(self.fps / half)))
+        got_rate = self.fps / (half * self.timing.stall())
+        if abs(got_rate - inst.pws_rate) > 0.05 * inst.pws_rate:
+            r.approx("instrument '%s': the pulse sweep speed %d is played as %.1f (whole frames only)" % (label, inst.pws_rate, got_rate))
         return got
 
     def _pulse_full(self, label):
@@ -342,7 +371,7 @@ class _Writer:
             placed.append((s, e, n))
         events = {}
         for i, (s, e, n) in enumerate(placed):
-            idx = self.gt_instrument(n.inst)
+            idx = self.gt_instrument(n.inst, self.t.bpm_at(n.start))
             pitch = n.pitch + self.instruments[idx - 1].shift
             folded = pitch
             while folded < 0:
@@ -384,10 +413,20 @@ class _Writer:
         g = self.grid(voices)
         total = max(1, int(round(t.length / g)))
         lens = self.row_lengths(g, total)
+        self.gate = 1 if lens and min(lens) < SLOW_ROW else 2
         once = t.once
         loop_row = 0 if once else min(total - 1, int(round(t.loop_tick / g)))
         if not once and loop_row * g != t.loop_tick:
             r.approx("the loop point is moved to the nearest row")
+        tempo_rows = {}
+        for k in range(total):
+            if k == 0 or lens[k] != lens[k - 1]:
+                tempo_rows[k] = lens[k]
+        if not once and loop_row and lens[loop_row] != lens[-1]:
+            tempo_rows[loop_row] = lens[loop_row]
+        # the row length the reader will take for this song: its commonest tempo command
+        seen = [v for k, v in sorted(tempo_rows.items())]
+        self.timing.row = max(set(seen), key=lambda v: (seen.count(v), v)) if seen else 6 * self.mult
 
         events = [self.voice_events(v, g, total) for v in voices]
         if self.moved:
@@ -400,12 +439,6 @@ class _Writer:
                 before = [k for k in ev if k < loop_row]
                 if not before or ev[max(before)][0] == "off":
                     ev[loop_row] = ("off",)
-        tempo_rows = {}
-        for k in range(total):
-            if k == 0 or lens[k] != lens[k - 1]:
-                tempo_rows[k] = lens[k]
-        if not once and loop_row and lens[loop_row] != lens[-1]:
-            tempo_rows[loop_row] = lens[loop_row]
 
         # the patterns
         bar_rows = t.bar_ticks // g if t.bar_ticks % g == 0 else 16
@@ -432,6 +465,11 @@ class _Writer:
         r.note("written for GoatTracker 2 (GTS5), %s timing (%g Hz), multispeed x%d, %d row%s a pattern (%d ticks a row)" % (
             "PAL" if self.region == "pal" else "NTSC", self.hz, self.mult, used_rows, "" if used_rows == 1 else "s", g))
         r.note("the file does not record PAL or NTSC, nor multispeed: open it with the same settings (the importer's --region and --multispeed)")
+        r.note("GoatTracker's player starts the first row %d player call(s) after the song starts, sounds a note one call after its row, "
+               "and cuts a note's release tail short when the next note's hard restart begins (checked against the real player)" % (6 * self.mult + 1))
+        if self.region == "ntsc":
+            r.approx("GoatTracker's frequency table is tuned for PAL: on an NTSC machine every note is 0.65 semitone sharp")
+        r.note("vibrato, portamento and pulse timing assume GoatTracker's default player optimisations (the editor's default, packer -O / -R)")
         if len(set(lens)) > 1:
             r.note("the tempo changes on %d row(s) (command F on voice 1) to keep the timing exact" % (len(tempo_rows) - 1))
         r.note("%d instrument(s), %d pattern(s)" % (len(self.instruments), len(patterns)))
@@ -447,7 +485,7 @@ class _Writer:
         out.append(len(self.instruments))
         for ins in self.instruments:
             k = ins.key
-            out += bytes((k[2] << 4 | k[3], k[4] << 4 | k[5], ins.ptr[0], ins.ptr[1], ins.ptr[2], ins.ptr[3], ins.vibdelay, GATE_TIMER, FIRST_WAVE))
+            out += bytes((k[2] << 4 | k[3], k[4] << 4 | k[5], ins.ptr[0], ins.ptr[1], ins.ptr[2], ins.ptr[3], ins.vibdelay, self.gate, FIRST_WAVE))
             out += ins.name.encode("ascii", "replace")[:15].ljust(16, b"\0")
         for tab in self.tables:
             out.append(len(tab.left))

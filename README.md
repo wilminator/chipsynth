@@ -31,7 +31,7 @@ sound.  Copyright (C) 2026 Michael Allen Wilmes.
 | `mml.py` | the tune language: parser, `Tune`, `Note`, the instrument / pattern / effect / scale / sample library |
 | `synth.py`, `synthfx.py` | the voices, envelopes, effects, filter; the shared echo and reverb bus |
 | `dpcm.py` | WAV to NES-style delta samples, the `.dpcm` file format (`python -m chipsynth.dpcm demo|convert`) |
-| `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report (expansion channels land on V5 and up); `formats.goattracker.load(bytes)` and `formats.sf2.load(bytes)` and `formats.sidwizard.load(bytes)` likewise; the writers are `formats.famistudio_export.dump(tune)` and `formats.goattracker_export.dump(tune)` and `formats.famitracker_export.dump(tune)` and `formats.furnace_export.dump(tune, target="nes"|"sid", region=)` -> file, report |
+| `formats/` | other tools' files, with a report of what could not be carried over: `formats.famistudio_text.load(text)` -> songs, samples, report (expansion channels land on V5 and up); `formats.goattracker.load(bytes)` and `formats.sf2.load(bytes)` and `formats.sidwizard.load(bytes)` likewise; the writers are `formats.famistudio_export.dump(tune)` and `formats.goattracker_export.dump(tune)` and `formats.sidwizard_export.dump(tune)` and `formats.furnace_export.dump(tune, target="nes"|"sid", region=)` and `formats.famitracker_export.dump(tune)` -> file, report |
 | `midi.py` | Standard MIDI files: `to_midi(tune)`, `from_midi(bytes, voices=None, drum_lanes="auto")` -> Song (a voice per part, up to 16; `voices=N` folds the rest into gaps; channel 10 drums go to D1 / D2, and to D3-D8 when hits fall together) |
 | `songedit.py` | `Editor`: note-level edits of a Song (add, erase, pitch, resize, move) with undo / redo |
 | `song.py`, `songmml.py` | the `Song` model (clips, repeats, calls kept as objects), `Song.compile()` to a `Tune`, MML import / export: `Song.from_mml(text)`, `song.to_mml()` |
@@ -161,7 +161,7 @@ What a conversion approximated or left out is never silent: the status line coun
 every line (a clean conversion needs no window). Dropping a `.sng`, `.sf2`, `.swm`, `.txt`, `.fms` or `.wav` on the window imports it too.
 
 * **WAV** export asks for the trips round the loop, normalizing to -1 dBFS, and the whole song or just the selected notes;
-  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL (no Version is written; see "FamiStudio versions" below); **FamiTracker** export asks NTSC or PAL; **GoatTracker** export asks PAL or NTSC, the multispeed and the tempo mode (see below); **Furnace** export asks the chip (NES or C64 SID) and NTSC or PAL (see below); **GoatTracker** import asks the region
+  the last notes ring for two seconds. **FamiStudio** export asks NTSC or PAL (no Version is written; see "FamiStudio versions" below); **FamiTracker** export asks NTSC or PAL; **GoatTracker** and **SID-Wizard** export ask PAL or NTSC, the multispeed and the tempo mode (see below); **Furnace** export asks the chip (NES or C64 SID) and NTSC or PAL (see below); **GoatTracker** import asks the region
   (the file does not record it), the multispeed and which subtune; a FamiStudio or Furnace file with several songs asks which; **SID Factory II** import asks the timing (as the file says, NTSC or PAL) and which song; a **SID-Wizard** import asks the region and the subtune (the file records its own frame speed).
 * **One song** from a FamiStudio, Furnace, GoatTracker or SID-Wizard file opens as a new unsaved song (Save asks where to put it), like a
   MIDI file. **Several songs** are written into a `.csp` package as `import` does: the open song's package when it has
@@ -296,6 +296,15 @@ settings:
 `--gt-tempo exact` (the default) changes the speed on the rows that need it when the song's tempo is not a whole number of frames
 a row, so every note starts on the nearest frame; `--gt-tempo speed` writes one speed (a whole number of frames a row) and says how
 far the tempo is out. A row lasts at least 3 frames, so a very fast song is moved to coarser rows (or use `--multispeed 2`).
+
+A song exported as **SID-Wizard** (`.swm`, from the ending or `-f sidwizard`) is made the same way: V1-V3 as the SID voices, with notes,
+rests, key-offs, the loop point and the tempo, and each instrument's ADSR, waveform and pulse width; an arpeggio and a pulse-width
+sweep become a wave table and a pulse table, and vibrato becomes the instrument's calculated vibrato. What is left out or
+approximated is printed. The file does not record PAL or NTSC, so open it with the same region; SID-Wizard starts each note two
+video frames into its row, and `--multispeed 2|4` here only makes the instrument tables (arpeggios, sweeps) run faster, as in the player:
+
+    python -m chipsynth export-song music/forest.csp:dawn -o dawn.swm --region pal
+    python -m chipsynth import music/back.csp dawn.swm --region pal
 
 ## Tests
 
