@@ -29,6 +29,7 @@ NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 LETTERS = (("c", 0), ("c", 1), ("d", 0), ("d", 1), ("e", 0), ("f", 0), ("f", 1), ("g", 0), ("g", 1), ("a", 0), ("a", 1), ("b", 0))
 DUTY_PW = (12, 25, 50, 75)                       # duty cycle 0-3 as a percent
 BASE = {"Square1": 0, "Square2": 1, "Triangle": 2, "Noise": 3, "DPCM": 4}
+SQUARE_SHIFT = 11                                 # chipsynth's pitch of a pulse note = FamiStudio's value + 11 (the triangle's is value - 1)
 NOISE_PERIOD = (4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068)
 NES_CPU = 1789773.0
 
@@ -177,7 +178,9 @@ def _values(text):
 
 
 def note_value(name):
-    """FamiStudio note name -> value: C0 is 1 (so chipsynth's pitch is value - 1).  'Stop' is 0, 'Release' 0x80."""
+    """FamiStudio note name -> value: C0 is 1.  'Stop' is 0, 'Release' 0x80.  What a value sounds like (checked by playing files in
+    FamiStudio 4.5): its note table starts at C1 = 32.7 Hz for value 1, so a pulse (and every chip's tone) sounds chipsynth's
+    pitch value + 11 (A3 is 440 Hz); the 2A03 triangle runs the same period an octave lower, so its pitch is value - 1."""
     if name == "Stop":
         return 0
     if name == "Release":
@@ -832,6 +835,9 @@ class _Ctx:
             end = min(end, pend)
             if end <= tick:
                 continue
+            stop_at = end                                                   # where FamiStudio stops the note: a release tail ends here
+            if 0 < _int(a, "Release", 0) < _int(a, "Duration", tm.note_len):
+                end = min(end, tick + tm.dur_ticks(_int(a, "Release", 0)))   # the note is held to its release point; what follows is the tail
             if idx == 4:
                 inst_cur = a.get("Instrument", inst_cur)
                 smp = self.sample(inst_cur, v)
@@ -845,7 +851,7 @@ class _Ctx:
             if idx == 3:
                 pitch = noise_pitch(v & 15, self.pal)
             else:
-                pitch = max(0, min(107, v - 1))
+                pitch = max(0, min(107, v - 1 if idx == 2 else v + SQUARE_SHIFT))     # see note_value
             duty = _int(a, "DutyCycle", -1) if "DutyCycle" in a else None
             if duty is not None and duty < 0:
                 duty = None
@@ -853,6 +859,8 @@ class _Ctx:
             plan = self.plan(inst_cur or "", ch.type, duty, arp_name)
             if plan is not None:                                            # a table-driven instrument: a short note a frame
                 limit = min(nxt if nxt is not None else pend, pend)
+                if stop_at != end and "Release" in a:
+                    limit = min(limit, stop_at)
                 events.extend(self.simulate(plan, ch.type, idx, pitch, tick, end, limit, vol_cur, duty, inst_cur or ""))
                 continue
             if arp_name and any(_values(self.prj.arpeggios.get(arp_name, {}).get("Values", ""))):

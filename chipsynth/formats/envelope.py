@@ -10,6 +10,89 @@ FIT_FRAMES = 120            # how much of an envelope the fit looks at (two seco
 GOOD = 0.08                 # an RMS error (0..1 of full volume) above this is reported as approximate
 
 
+def volume_envelope(inst, hz, limit=255):
+    """The instrument's ADSR sampled once a frame, as (values 0-15, loop, release): the gate part, ending in a loop on its last
+    value (the sustain), and from `release` on the tail that decays the way chipsynth's release does (`release` is -1 and the
+    tail empty when the release is too short to hear or the sustain is 0).  None for a flat full volume with no tail."""
+    t = (np.arange(240) + 0.5) / hz                         # the middle of each frame
+    level = adsr(inst.a & 15, inst.d & 15, inst.s & 15, inst.r & 15, None, t) * inst.vol
+    vals = [int(max(0, min(15, round(x)))) for x in level]
+    last = len(vals) - 1
+    while last > 0 and vals[last - 1] == vals[-1]:
+        last -= 1
+    gate = vals[:last + 1]
+    rel_vals = []
+    rsec = DECAY_MS[inst.r & 15] / 1000.0
+    if gate[-1] and rsec * hz >= 2:
+        k = 1
+        while k < 90:
+            v = int(round(level[-1] * math.exp(-6.9 * (k / hz) / rsec)))
+            rel_vals.append(max(0, v))
+            if v <= 0:
+                break
+            k += 1
+    if gate == [15] and not rel_vals:
+        return None
+    values = gate + rel_vals
+    return values[:limit], len(gate) - 1, (len(gate) if rel_vals else -1)
+
+
+def release_frames(inst, vol, gate_s, hz=None):
+    """Frames of release tail the volume envelope `vol` (from volume_envelope) plays for a note held `gate_s` seconds, or 0.  The
+    envelope's release starts from the sustain level, so a note let go while its level is still below 60% of that (it is
+    rising) is cut instead of jumping up to the tail."""
+    if not vol or vol[2] < 0 or vol[2] >= len(vol[0]):
+        return 0
+    values, loop, release = vol
+    sus = values[loop]
+    at = float(adsr(inst.a & 15, inst.d & 15, inst.s & 15, inst.r & 15, None, np.array([gate_s]))[0]) * inst.vol
+    return 0 if at < 0.6 * sus else len(values) - release
+
+
+def whole_cycles(cycle, limit):
+    """(frames, cycles, scaled): the fewest whole cycles of `cycle` frames (a fraction of a frame, as the tempo makes it) that
+    fit in `limit` frames and land within 0.2% of a whole number of frames.  A tracker's sequence is a whole number of
+    frames, so when it loops each trip must be the same length: this keeps a loop in step with the song instead of drifting
+    a step in a second.  `scaled` is True when one cycle is longer than `limit` and was sped up to fit."""
+    cycle = max(1.0, cycle)
+    best = None
+    k = 1
+    while int(round(k * cycle)) <= limit:
+        total = int(round(k * cycle))
+        err = abs(total - k * cycle) / (k * cycle)
+        if best is None or err < best[0] - 1e-12:
+            best = (err, total, k)
+        if err < 0.002:
+            break
+        k += 1
+    if best is None:
+        return limit, 1, True
+    return best[1], best[2], False
+
+
+def arp_sequence(offsets, step, limit):
+    """The per-frame values of an arpeggio that moves to its next offset every `step` frames, as (values, scaled): see
+    whole_cycles for the length."""
+    n = len(offsets)
+    total, k, scaled = whole_cycles(max(1.0, step) * n, limit)
+    each = total / (k * n)                       # frames to a step, nudged so that whole cycles fill the sequence
+    return [int(offsets[int(f / each) % n]) for f in range(total)], scaled
+
+
+def pws_sequence(inst, hz, limit, snap):
+    """The per-frame values (snap(width in percent) each) of a pulse-width sweep, or None when the instrument has none.
+    chipsynth sweeps the width from `pws_from` to `pws_to` and back as a triangle wave, `pws_rate` / 2 times a second."""
+    if not (inst.wave == "pulse" and inst.pws_rate and inst.pws_from and inst.pws_to):
+        return None
+    total, k, _ = whole_cycles(2.0 * hz / inst.pws_rate, limit)
+    per = total / k
+    out = []
+    for f in range(total):
+        tri = 1.0 - abs(2.0 * ((f / per) % 1.0) - 1.0)
+        out.append(snap(min(99, max(1, inst.pws_from + (inst.pws_to - inst.pws_from) * tri))))
+    return out
+
+
 def resolve(values, loop, release, length, frames, released_at=None):
     """The value of an envelope on each of `frames` frames, as the NES driver plays it: it steps one value a frame, jumps to
     `loop` at the end (or holds the last value), and from `release` on only plays once the note is released

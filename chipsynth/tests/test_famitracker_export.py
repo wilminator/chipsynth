@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Writing FamiTracker text.  The check is a reader of our own, written from the format and as strict as FamiStudio's
 FamiTracker-text reader is about where on a line things sit (header text, `ROW xx`, `ORDER xx`, the field counts): what
-is written must read back, note for note and frame for frame.  Nothing here was opened in FamiTracker or FamiStudio."""
+is written must read back, note for note and frame for frame.  The reader is ours; what the real FamiStudio does with these files
+(pitch, timing, envelopes, release, loop) was checked by running its command line on them, and the tests marked "played in
+FamiStudio" pin what that showed.  Nothing here was opened in FamiTracker itself."""
 import re
 import tempfile
 import unittest
@@ -187,9 +189,10 @@ class FamiTrackerText:
         return PAL_HZ if self.machine == 1 else FRAME_HZ
 
 
-def pitch_of(text):
-    """chipsynth pitch of 'C-4' (note names count from C-0 = pitch 0)."""
-    return int(text[2]) * 12 + NOTE_NUMBER[text[:2]]
+def pitch_of(text, voice=2):
+    """chipsynth pitch of 'C-4' on a voice.  The triangle's C-4 is chipsynth's C4 (pitch 48); a pulse's is an octave higher
+    (FamiTracker's A-3 is 440 Hz on the pulse channels, checked by playing the file in FamiStudio), so pitch 60."""
+    return int(text[2]) * 12 + NOTE_NUMBER[text[:2]] + (12 if voice < 2 else 0)
 
 
 def tune_of(text=MML, **kw):
@@ -219,10 +222,10 @@ class Timing(unittest.TestCase):
         real_row = base * t["speed"] / t["tempo"] / hz
         drift = abs(real_row / want_row - 1)
         for v in voices:
-            got = [(f, c) for f, c, _, _ in ev[v] if c != "---"]
+            got = [(f, c) for f, c, _, _ in ev[v] if c not in ("---", "===")]
             self.assertEqual(len(got), len(tune.voices[v]), "voice %d" % (v + 1))
             for (f, c), n in zip(got, tune.voices[v]):
-                self.assertEqual(pitch_of(c), n.pitch, "voice %d pitch" % (v + 1))
+                self.assertEqual(pitch_of(c, v), n.pitch, "voice %d pitch" % (v + 1))
                 sec = n.start * seconds_per_tick(tune)
                 self.assertLessEqual(abs(f / hz - sec), 1.6 / hz + drift * sec, "voice %d at %.3fs" % (v + 1, sec))
         return ev, hz, drift
@@ -244,15 +247,15 @@ class RoundTripTests(Timing):
     def test_a_note_cut_comes_where_the_note_ends_and_not_between_joined_notes(self):
         tune, ft, *_ = read("tempo 120\nV1: l4 c d r e\n")
         ev, hz, _ = self.assert_notes(tune, ft, (0,))
-        cuts = [f for f, c, _, _ in ev[0] if c == "---"]
-        self.assertEqual(len(cuts), 1)                      # after d, where the rest is (c runs into d; e ends the song)
+        cuts = [f for f, c, _, _ in ev[0] if c in ("---", "===")]     # the lead has a release: its tail is let go with `===`
+        self.assertLessEqual(len(cuts), 2)                   # after d, where the rest is (c runs into d; e ends the song): the release, then the cut
         d = tune.voices[0][1]
         self.assertAlmostEqual(cuts[0] / hz, (d.start + d.dur) * seconds_per_tick(tune), delta=1.6 / hz)
 
     def test_a_note_longer_than_a_pattern_is_written_once(self):
         tune, ft, text, _ = read("tempo 120\ntime 4/4\nV1: o4 c1 c1 c1 c1\n")
         ev, hz, _ = self.assert_notes(tune, ft, (0,))
-        self.assertEqual(len([e for e in ev[0] if e[1] != "---"]), 4)
+        self.assertEqual(len([e for e in ev[0] if e[1] not in ("---", "===")]), 4)
 
     def test_the_song_is_as_long_as_the_tune(self):
         tune, ft, *_ = read()
@@ -344,11 +347,29 @@ class InstrumentTests(unittest.TestCase):
         d = self.inst(ft, "lead")
         loop, rel, setting, vals = ft.macros[(0, d["vol"])]
         import numpy as np
-        t = (np.arange(len(vals)) + 0.5) / FRAME_HZ
+        gate = vals[:rel + 1]                                          # up to the sustain: what a held note plays
+        t = (np.arange(len(gate)) + 0.5) / FRAME_HZ
         want = [int(round(x)) for x in adsr(0, 6, 8, 3, None, t) * 15]
-        self.assertEqual(vals, want)
-        self.assertEqual((loop, rel, setting), (len(vals) - 1, -1, 0))
-        self.assertEqual(vals[-1], 8)                                  # it ends on the sustain level
+        self.assertEqual(gate, want)
+        self.assertEqual(gate[-1], 8)                                  # it ends on the sustain level
+        self.assertEqual((loop, setting), (-1, 0))                     # no loop: with a release point FamiTracker holds the sustain value
+
+    def test_the_release_is_a_tail_after_the_sustain_that_decays_like_chipsynths(self):
+        _, ft, *_ = read()
+        loop, rel, setting, vals = ft.macros[(0, self.inst(ft, "lead")["vol"])]
+        tail = vals[rel + 1:]
+        self.assertGreaterEqual(len(tail), 2)
+        self.assertEqual(tail[-1], 0)
+        self.assertEqual(tail, sorted(tail, reverse=True))
+
+    def test_a_note_followed_by_a_rest_is_released_then_cut_and_a_legato_note_is_not(self):
+        """Played in FamiStudio: a `===` cell plays the volume sequence's release part; the cut after it comes where the tail is silent."""
+        _, ft, *_ = read("tempo 120\n[instr]\nl wave=pulse a=0 d=6 s=8 r=5\nV1: @l l4 c d r2\n")
+        ev, _, _, _ = ft.play()
+        cells = [c for _, c, _, _ in ev[0]]
+        self.assertEqual(cells[0][:2], "C-")
+        self.assertEqual(cells[1][:2], "D-")
+        self.assertEqual(cells[2:], ["===", "---"])                   # c runs into d: no release between them
 
     def test_a_flat_full_volume_has_no_macro_and_the_triangle_never_has_one(self):
         _, ft, *_ = read("[instr]\nflat wave=pulse a=0 d=0 s=15 r=0\nV1: @flat c\nV3: c\n")

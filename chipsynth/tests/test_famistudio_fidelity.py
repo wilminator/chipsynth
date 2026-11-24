@@ -69,9 +69,9 @@ class ExpansionTests(unittest.TestCase):
         song = imp.song
         self.assertEqual((song.voices, song.dacs), (7, 1))
         t = tune_of(imp)
-        self.assertEqual([n[2] for n in notes(t, 4)], [48, 52])                  # C4, E4 on V5
-        self.assertEqual(notes(t, 5)[0][2], 55)                                  # G4 on V6
-        self.assertEqual(notes(t, 6)[0][2], 36)                                      # C3 on V7
+        self.assertEqual([n[2] for n in notes(t, 4)], [60, 64])                  # C4, E4 on V5 (a tone sounds an octave above the name's pitch: FamiStudio's A3 is 440 Hz)
+        self.assertEqual(notes(t, 5)[0][2], 67)                                  # G4 on V6
+        self.assertEqual(notes(t, 6)[0][2], 48)                                      # C3 on V7
         self.assertEqual(t.voices[6][0].inst.wave, "saw")
         self.assertEqual((t.voices[4][0].inst.wave, t.voices[4][0].inst.pw), ("pulse", 25))      # VRC6 duty 3 = 4/16
         self.assertEqual(t.voices[4][1].inst.pw, 50)                              # note duty 7 = 8/16
@@ -248,7 +248,7 @@ class SimulationTests(unittest.TestCase):
                      chan("Square1", '0 G4 2 Instrument="Z"'))
         r, imp = load(text)
         ns = notes(imp and tune_of(imp), 0)
-        self.assertEqual([n[2] for n in ns], [67, 62, 55])                         # G5, D5, G4 held
+        self.assertEqual([n[2] for n in ns], [79, 74, 67])                         # G6, D6, G5 held
         self.assertEqual([n[0] for n in ns], [0, 4, 8])
         self.assertIn("arpeggio envelope", report_text(r))
 
@@ -276,7 +276,7 @@ class SimulationTests(unittest.TestCase):
                      chan("Square1", '0 E4 2 Instrument="K"'))
         r, imp = load(text)
         ps = [n[2] for n in notes(tune_of(imp), 0)]
-        self.assertEqual(ps[0], 51)                                                # the first -20 units is a semitone down from E4... of 52
+        self.assertEqual(ps[0], 62)                                                # -20 period units at E5 (64) are nearly two semitones down
         self.assertTrue(all(a > b for a, b in zip(ps, ps[1:])))
         self.assertIn("whole semitone", report_text(r))
         self.assertNotIn("pitch envelope", "\n".join(r.report.dropped))

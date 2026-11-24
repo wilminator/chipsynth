@@ -8,10 +8,8 @@ Version attribute: FamiStudio versions keep moving, and a FamiStudio that has dr
 """
 import math
 
-import numpy as np
-
-from .envelope import FRAME_HZ, adsr
-from .famistudio_text import DUTY_PW, NOTE_NAMES, PAL_HZ, FamiStudioError, noise_pitch, split_line
+from .envelope import FRAME_HZ, arp_sequence, pws_sequence, release_frames, volume_envelope
+from .famistudio_text import DUTY_PW, SQUARE_SHIFT, NOTE_NAMES, PAL_HZ, FamiStudioError, noise_pitch, split_line
 from .report import Report
 
 PPQ = 96
@@ -19,6 +17,8 @@ MAX_PATTERN_ROWS = 64
 GRIDS = (24, 12, 8, 6, 4, 3, 2, 1)                  # ticks a row can last: 96 / g rows to a beat
 CHANNELS = ("Square1", "Square2", "Triangle", "Noise")
 DPCM_NOTE0 = 13                                      # C1: the first note a sample is mapped to
+SQUARE_LOW = 21                                      # the lowest pitch (A1, 55 Hz) a 11-bit square period reaches
+MAX_ENV = 255                                        # values in one FamiStudio envelope
 SAMPLE_BYTES = 4081                                  # the most the NES driver can play from one sample
 
 
@@ -48,6 +48,9 @@ class _Writer:
         self.inst_used = {}               # (inst key, kind) -> FamiStudio name
         self.inst_twin = {}               # (the instrument's text, kind) -> FamiStudio name: equal instruments are written once
         self.inst_lines = []
+        self.low = []                     # square pitches below what a period can reach
+        self.vol_cache = {}               # id(Instrument) -> volume_env result
+        self.total_rows = 0
         self.names = {}                   # id(Instrument) -> chipsynth name
         for n, i in tune.instruments.items():
             self.names.setdefault(id(i), n)
@@ -85,8 +88,8 @@ class _Writer:
         if base < 1:
             groove = [1]
             self.r.approx("the tempo is faster than one frame a row: it is played at one frame a row")
-        elif err > 0.005:
-            self.r.approx("the tempo is %.1f%% off after rounding to whole frames" % (err * 100))
+        elif err > 0.001:
+            self.r.approx("the tempo is %.2f%% off after rounding to whole frames (the song drifts that much against its score)" % (err * 100))
         return groove
 
     # ---- instruments
@@ -113,7 +116,7 @@ class _Writer:
     def inst_text(self, inst, name, kind, label):
         lines = ["\tInstrument" + _attr("Name", name)]
         if kind != "tri":
-            vol = self.volume_env(inst)
+            vol = self.volume(inst)
             if vol:
                 lines.append("\t\tEnvelope" + _attr("Type", "Volume") + _attr("Length", len(vol[0]))
                              + (_attr("Loop", vol[1]) if vol[1] >= 0 else "") + (_attr("Release", vol[2]) if vol[2] >= 0 else "")
@@ -121,48 +124,42 @@ class _Writer:
         if kind == "noise":
             lines.append("\t\tEnvelope" + _attr("Type", "DutyCycle") + _attr("Length", 1) + _attr("Values", 1 if inst.nmode == "short" else 0))
         elif kind == "sq":
-            duty = min(range(4), key=lambda i: abs(DUTY_PW[i] - inst.pw))
-            if inst.wave == "pulse" and abs(DUTY_PW[duty] - inst.pw) > 3:
-                self.r.approx("instrument '%s': pulse width %d%% is played as %d%% (the NES has 12, 25, 50 and 75)" % (label, inst.pw, DUTY_PW[duty]))
-            lines.append("\t\tEnvelope" + _attr("Type", "DutyCycle") + _attr("Length", 1) + _attr("Values", duty))
+            snap = lambda pw: min(range(4), key=lambda i: abs(DUTY_PW[i] - pw))
+            sweep = pws_sequence(inst, self.hz, MAX_ENV, snap)
+            if sweep:
+                self.r.approx("instrument '%s': the pulse-width sweep is sampled once a frame and played with the NES's four widths (12, 25, 50, 75)" % label)
+                lines.append("\t\tEnvelope" + _attr("Type", "DutyCycle") + _attr("Length", len(sweep)) + _attr("Loop", 0)
+                             + _attr("Values", ",".join(map(str, sweep))))
+            else:
+                duty = snap(inst.pw)
+                if inst.wave == "pulse" and abs(DUTY_PW[duty] - inst.pw) > 3:
+                    self.r.approx("instrument '%s': pulse width %d%% is played as %d%% (the NES has 12, 25, 50 and 75)" % (label, inst.pw, DUTY_PW[duty]))
+                lines.append("\t\tEnvelope" + _attr("Type", "DutyCycle") + _attr("Length", 1) + _attr("Values", duty))
             if inst.wave not in ("pulse", "tri", "noise"):
                 self.r.approx("instrument '%s': a %s wave is played as a pulse" % (label, inst.wave))
         if inst.arp:
-            step = max(1, round(60.0 / max(1, self.t.bpm) * self.hz / max(1, inst.arprate)))
-            vals = [int(o) for o in inst.arp for _ in range(step)]
+            step = 60.0 / max(1, self.t.bpm) * self.hz / max(1, inst.arprate)          # frames to a step
+            vals, scaled = arp_sequence(inst.arp, step, MAX_ENV)
+            if scaled:
+                self.r.approx("instrument '%s': the arpeggio is longer than FamiStudio's %d-value envelopes: it is sped up to fit" % (label, MAX_ENV))
+            elif step < 1.0:
+                self.r.approx("instrument '%s': the arpeggio steps faster than once a frame: it is played at one step a frame" % label)
             lines.append("\t\tEnvelope" + _attr("Type", "Arpeggio") + _attr("Length", len(vals)) + _attr("Loop", 0)
                          + _attr("Values", ",".join(map(str, vals))))
-        dropped = [w for w, on in (("vibrato", inst.vib_rate and inst.vib_depth), ("slide", inst.slide), ("pulse-width sweep", inst.pws_rate),
+        dropped = [w for w, on in (("vibrato", inst.vib_rate and inst.vib_depth), ("slide", inst.slide), ("pulse-width sweep", inst.pws_rate and kind != "sq"),
                                    ("filter", inst.filt), ("filter sweep", inst.filt and inst.fs_rate), ("pan", inst.pan)) if on]
         if dropped:
             self.r.drop("instrument '%s': %s" % (label, ", ".join(dropped)))
         return lines
 
-    def volume_env(self, inst):
-        """(values, loop, release) sampling the ADSR once a frame, or None for a flat full volume."""
-        t = (np.arange(240) + 0.5) / self.hz                # the middle of each frame
-        level = adsr(inst.a & 15, inst.d & 15, inst.s & 15, inst.r & 15, None, t) * inst.vol
-        vals = [int(max(0, min(15, round(x)))) for x in level]
-        last = len(vals) - 1
-        while last > 0 and vals[last - 1] == vals[-1]:
-            last -= 1
-        gate = vals[:last + 1]
-        if gate == [15]:
-            return None
-        sus = gate[-1]
-        rel_vals = []
-        from ..synth import DECAY_MS
-        rsec = DECAY_MS[inst.r & 15] / 1000.0
-        if sus and rsec * self.hz >= 2:
-            k = 1
-            while k < 90:
-                v = int(round(level[-1] * math.exp(-6.9 * (k / self.hz) / rsec)))
-                rel_vals.append(max(0, v))
-                if v <= 0:
-                    break
-                k += 1
-        values = gate + rel_vals
-        return values[:255], len(gate) - 1, (len(gate) if rel_vals else -1)
+    def volume(self, inst):
+        """(values, loop, release) of the instrument's volume envelope, or None for a flat full volume (see envelope.volume_envelope)."""
+        if id(inst) not in self.vol_cache:
+            self.vol_cache[id(inst)] = volume_envelope(inst, self.hz, MAX_ENV)
+        return self.vol_cache[id(inst)]
+
+    def tail_frames(self, inst, gate_s):
+        return release_frames(inst, self.volume(inst), gate_s)
 
     # ---- the file
     def run(self):
@@ -172,8 +169,18 @@ class _Writer:
         nl = min(groove)
         bar_rows = max(1, t.bar_ticks // g)
         plen = bar_rows if bar_rows <= MAX_PATTERN_ROWS else 16
+        if len(groove) > 1 and plen % len(groove):
+            # FamiStudio restarts the groove at every pattern: a pattern that is not a whole number of groove cycles runs fast
+            # (a 16-row pattern of the 5-row groove 5-5-6-5-6 is 86 frames, not 86.4: a 0.4% drift). Use whole cycles.
+            gl = len(groove)
+            whole = plen * gl // math.gcd(plen, gl)
+            if whole > MAX_PATTERN_ROWS:
+                whole = max(gl, MAX_PATTERN_ROWS // gl * gl)
+            plen = whole
         total_rows = max(1, -(-t.length // g))
+        self.total_rows = total_rows
         npat = -(-total_rows // plen)
+        last_rows = total_rows - (npat - 1) * plen                  # the song ends here, not at the end of its last pattern
         loop_row = t.loop_tick // g
         loop = -1 if t.once else min(npat - 1, loop_row // plen)
         if not t.once and loop_row % plen:
@@ -189,6 +196,9 @@ class _Writer:
 
         chans = [self.melodic(i, g, plen, npat, nl) for i in range(4)]
         dpcm_lines, dpcm_chan, samples = self.dpcm(g, plen, npat, nl)
+        if self.low:
+            r.approx("%d square note%s below A1 (55 Hz), where the NES's 11-bit period runs out: FamiStudio plays %s wrongly"
+                     % (len(self.low), "" if len(self.low) == 1 else "s", "it" if len(self.low) == 1 else "them"))
 
         out = ["Project" + _attr("TempoMode", "FamiStudio")
                + (_attr("Name", self.name or t.title) if (self.name or t.title) else "")
@@ -201,6 +211,9 @@ class _Writer:
         out.append("\tSong" + _attr("Name", self.name or t.title or "Song") + _attr("Length", npat) + _attr("LoopPoint", loop)
                    + _attr("PatternLength", plen) + _attr("BeatLength", PPQ // g) + _attr("NoteLength", nl)
                    + _attr("Groove", "-".join(map(str, groove))) + _attr("GroovePaddingMode", "Beginning"))
+        if last_rows < plen:
+            out.append("\t\tPatternCustomSettings" + _attr("Time", npat - 1) + _attr("Length", last_rows) + _attr("NoteLength", nl)
+                       + _attr("Groove", "-".join(map(str, groove))) + _attr("GroovePaddingMode", "Beginning") + _attr("BeatLength", PPQ // g))
         for ctype, lines in zip(CHANNELS + ("DPCM",), chans + [dpcm_chan]):
             out.append("\t\tChannel" + _attr("Type", ctype))
             out += lines
@@ -222,26 +235,27 @@ class _Writer:
         return out
 
     def patterns(self, notes, plen, npat, nl, attrs_of):
-        """Lay [(row, dur rows, payload)] out in patterns of `plen` rows (a note over a pattern's end goes on in the next
-        without a new attack).  Returns the Channel's lines."""
+        """Lay [(row, dur rows, payload, tail frames)] out in patterns of `plen` rows (a note over a pattern's end goes on in the
+        next without a new attack; the tail is a release that rings on after the note's last row, which `attrs_of` writes as
+        a longer Duration with a Release point).  Returns the Channel's lines."""
         pats = [[] for _ in range(npat)]
-        for row, dur, p in notes:
+        for row, dur, p, tail in notes:
             r0 = row
             first = True
             while dur > 0 and r0 // plen < npat:
                 k, local = divmod(r0, plen)
                 take = min(dur, plen - local)
-                pats[k].append((local, take, p, first))
+                pats[k].append((local, take, p, first, tail if take == dur else 0))
                 r0 += take
                 dur -= take
                 first = False
-        # a stop where a note ends and nothing follows
+        # a stop where a note ends and nothing follows (a note with a release tail stops itself at the tail's end)
         for i in range(len(notes)):
-            row, dur, p = notes[i]
+            row, dur, p, tail = notes[i]
             end = row + dur
             nxt = notes[i + 1][0] if i + 1 < len(notes) else None
-            if nxt != end and end // plen < npat:
-                pats[end // plen].append((end % plen, None, None, True))
+            if nxt != end and end < self.total_rows and end // plen < npat and not tail:
+                pats[end // plen].append((end % plen, None, None, True, 0))
         names, seen, lines, inst_of = [], {}, [], {}
         instances = []
         for k, items in enumerate(pats):
@@ -253,12 +267,12 @@ class _Writer:
                 if clean and clean[-1][0] == it[0]:
                     continue                      # a stop on the row a note starts: the note wins
                 clean.append(it)
-            key = tuple((l, d, str(p), f) for l, d, p, f in clean)
+            key = tuple((l, d, str(p), f, tl) for l, d, p, f, tl in clean)
             if key not in seen:
                 seen[key] = "P%d" % (len(seen) + 1)
                 lines.append("\t\t\tPattern" + _attr("Name", seen[key]))
-                for l, d, p, f in clean:
-                    lines.append("\t\t\t\t" + attrs_of(l * nl, d, p, f))
+                for l, d, p, f, tl in clean:
+                    lines.append("\t\t\t\t" + attrs_of(l * nl, d, p, f, tl))
             instances.append((k, seen[key]))
         for k, nm in instances:
             lines.append("\t\t\tPatternInstance" + _attr("Time", k) + _attr("Pattern", nm))
@@ -266,7 +280,7 @@ class _Writer:
 
     def melodic(self, v, g, plen, npat, nl):
         t = self.t
-        total_rows = npat * plen
+        total_rows = self.total_rows
         kind = ("sq", "sq", "tri", "noise")[v]
         if v >= len(t.voices) or not t.voices[v]:
             return []
@@ -284,11 +298,21 @@ class _Writer:
                 self.r.drop("per-note pan")
                 break
 
-        def attrs(time, dur, n, first):
+        spt = 60.0 / (max(1, t.bpm) * PPQ)                  # seconds a tick lasts
+        tails = []
+        for i, (row, dur, n) in enumerate(placed):
+            room = ((placed[i + 1][0] if i + 1 < len(placed) else total_rows) - (row + dur)) * nl
+            gate = min(n.dur, dur * g) * spt
+            tails.append(max(0, min(self.tail_frames(n.inst, gate) if kind != "tri" else 0, room)))
+        notes4 = [(row, dur, n, tail) for (row, dur, n), tail in zip(placed, tails)]
+
+        def attrs(time, dur, n, first, tail):
             if n is None:
                 return "Note" + _attr("Time", time) + _attr("Value", "Stop")
             val = self.value(v, n.pitch)
-            s = "Note" + _attr("Time", time) + _attr("Value", note_name(val)) + _attr("Duration", dur * nl)
+            s = "Note" + _attr("Time", time) + _attr("Value", note_name(val)) + _attr("Duration", dur * nl + tail)
+            if tail:
+                s += _attr("Release", dur * nl)
             if first:
                 s += _attr("Instrument", self.inst_name(n.inst, kind))
                 if kind != "tri" and n.vol != state["vol"]:
@@ -297,13 +321,17 @@ class _Writer:
             else:
                 s += _attr("Attack", "false")
             return s
-        return self.patterns(placed, plen, npat, nl, attrs)
+        return self.patterns(notes4, plen, npat, nl, attrs)
 
     def value(self, v, pitch):
         if v == 3:
             low4 = min(range(16), key=lambda k: (abs(noise_pitch(k, self.pal) - pitch), k))
             return 16 + low4
-        return max(1, min(96, pitch + 1))
+        if v < 2:                                  # the squares sound an octave above the name (FamiStudio's A3 is 440 Hz, a
+            if pitch < SQUARE_LOW:                 # square's period at the table's first notes is past what the NES can write)
+                self.low.append(pitch)
+            return max(1, min(96, pitch - SQUARE_SHIFT))
+        return max(1, min(96, pitch + 1))          # the triangle sounds an octave below the square of the same note
 
     def dpcm(self, g, plen, npat, nl):
         t = self.t
@@ -343,10 +371,10 @@ class _Writer:
             if nxt:
                 end = min(nxt)
             items.append((e[0], end - e[0], (e[2].name, e[2].rate)))
-        placed = self.rows(items, g, nl, npat * plen)
+        placed = [(r_, d_, p_, 0) for r_, d_, p_ in self.rows(items, g, nl, self.total_rows)]
         val_of = {k: DPCM_NOTE0 + i for k, i in order.items()}
 
-        def attrs(time, dur, p, first):
+        def attrs(time, dur, p, first, tail):
             if p is None:
                 return "Note" + _attr("Time", time) + _attr("Value", "Stop")
             s = "Note" + _attr("Time", time) + _attr("Value", note_name(val_of[p])) + _attr("Duration", dur * nl)

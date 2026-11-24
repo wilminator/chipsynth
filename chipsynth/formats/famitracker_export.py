@@ -24,10 +24,8 @@ NTSC (125 / tempo on PAL), so (speed, tempo) is chosen to land the row length wi
 player's tempo counter spreads the odd frames over the rows.  The loop is a `Bxx` on the last row of the last pattern
 (a song marked once gets `C00`, which halts).
 """
-import numpy as np
-
-from .envelope import FRAME_HZ, adsr
-from .famistudio_text import DUTY_PW, PAL_HZ, noise_pitch
+from .envelope import FRAME_HZ, arp_sequence, pws_sequence, release_frames, volume_envelope
+from .famistudio_text import DUTY_PW, SQUARE_SHIFT, PAL_HZ, noise_pitch
 from .report import Report
 
 HEADER = "# FamiTracker text export 0.4.2"
@@ -43,6 +41,7 @@ SEQ_VOLUME, SEQ_ARPEGGIO, SEQ_PITCH, SEQ_DUTY = 0, 1, 2, 4
 CHANNELS = ("Pulse 1", "Pulse 2", "Triangle", "Noise", "DPCM")
 DPCM_NOTE0 = 13                                      # C-1: the key of the first sample
 SAMPLE_KEYS = 36
+SQUARE_LOW = 21                                      # the lowest pitch (A1, 55 Hz) an 11-bit period reaches
 SAMPLE_BYTES = 4081                                  # the most the NES driver plays from one sample
 EMPTY = ("...", "..", ".")
 
@@ -98,6 +97,9 @@ class _Writer:
         self.inst_of = {}                            # (id(Instrument), kind) -> index in self.insts
         self.by_content = {}                         # (kind, vol, arp, duty) -> index: instruments that sound the same share
         self.said = set()
+        self.row_frames = 6.0
+        self.vol_cache = {}                          # id(Instrument) -> volume_envelope result
+        self.low = 0                                 # pulse notes below what a period can reach
         self.cut_release = []                        # instruments whose release tail is not played
 
     # ---- timing
@@ -124,6 +126,7 @@ class _Writer:
         if row_frames < 1.0:
             self.r.approx("the tempo is faster than one frame a row: it is played at one frame a row")
         speed, tempo, real = speed_and_tempo(max(1.0, row_frames), self.pal)
+        self.row_frames = real                       # frames a row really lasts
         err = abs(real - max(1.0, row_frames)) / max(1.0, row_frames)
         if err > 0.005:
             self.r.approx("the tempo is %.1f%% off after rounding to FamiTracker's speed and tempo" % (err * 100))
@@ -142,10 +145,10 @@ class _Writer:
         return fits[0] if fits else order[-1] if order else MAX_ROWS
 
     # ---- macros and instruments
-    def macro(self, kind, values, loop):
+    def macro(self, kind, values, loop, release=-1):
         """Index of the macro with these values, adding it; -1 when there is no room."""
         values = tuple(int(v) for v in values)[:MAX_MACRO]
-        key = (values, min(loop, len(values) - 1))
+        key = (values, min(loop, len(values) - 1), release if release < len(values) else -1)
         lst = self.macros[kind]
         if key in lst:
             return lst.index(key)
@@ -161,27 +164,18 @@ class _Writer:
             (self.r.drop if drop else self.r.approx)(msg)
 
     def volume_values(self, inst):
-        """The volume macro (values, loop) sampling the ADSR once a frame, or None for a flat full volume."""
-        t = (np.arange(240) + 0.5) / self.hz                 # the middle of each frame
-        level = adsr(inst.a & 15, inst.d & 15, inst.s & 15, inst.r & 15, None, t) * inst.vol
-        vals = [int(max(0, min(15, round(x)))) for x in level]
-        last = len(vals) - 1
-        while last > 0 and vals[last - 1] == vals[-1]:
-            last -= 1
-        vals = vals[:last + 1]
-        if vals == [15]:
-            return None
-        return vals, len(vals) - 1
+        """The volume macro (values, loop, release) sampling the ADSR once a frame, or None for a flat full volume.  The
+        release part is played after a `===` cell (see envelope.volume_envelope)."""
+        key = id(inst)
+        if key not in self.vol_cache:
+            self.vol_cache[key] = volume_envelope(inst, self.hz, MAX_MACRO)
+        return self.vol_cache[key]
 
     def duty_values(self, inst, label):
         """The duty macro (values, loop) of a pulse instrument: its width, or its width sweep sampled once a frame."""
         snap = lambda pw: min(range(4), key=lambda i: abs(DUTY_PW[i] - pw))
-        if inst.wave == "pulse" and inst.pws_rate and inst.pws_from and inst.pws_to:
-            n = max(2, min(MAX_MACRO, round(2.0 * self.hz / inst.pws_rate)))
-            vals = []
-            for i in range(n):
-                tri = 1.0 - abs(2.0 * (i / n) - 1.0)
-                vals.append(snap(min(99, max(1, inst.pws_from + (inst.pws_to - inst.pws_from) * tri))))
+        vals = pws_sequence(inst, self.hz, MAX_MACRO, snap)
+        if vals:
             self.say("instrument '%s': the pulse-width sweep is sampled once a frame and played with the NES's four widths (12, 25, 50, 75)" % label)
             return vals, 0
         duty = snap(inst.pw)
@@ -190,15 +184,13 @@ class _Writer:
         return [duty], -1
 
     def arp_values(self, inst, label):
-        step = max(1.0, 60.0 / max(1, self.t.bpm) * self.hz / max(1, inst.arprate))     # frames to a step
-        n = len(inst.arp)
-        total = max(n, round(step * n))
-        if total > MAX_MACRO:
-            self.say("instrument '%s': the arpeggio is longer than FamiTracker's %d-value sequences: it is cut and sped up" % (label, MAX_MACRO))
-            step, total = step * MAX_MACRO / total, MAX_MACRO
-        elif abs(step - round(step)) > 0.05 * step:
-            self.say("instrument '%s': the arpeggio's steps are not a whole number of frames long: they are rounded to frames" % label)
-        return [int(inst.arp[int(f / step) % n]) for f in range(total)], 0
+        step = 60.0 / max(1, self.t.bpm) * self.hz / max(1, inst.arprate)             # frames to a step
+        vals, scaled = arp_sequence(inst.arp, step, MAX_MACRO)
+        if scaled:
+            self.say("instrument '%s': the arpeggio is longer than FamiTracker's %d-value sequences: it is sped up to fit" % (label, MAX_MACRO))
+        elif step < 1.0:
+            self.say("instrument '%s': the arpeggio steps faster than once a frame: it is played at one step a frame" % label)
+        return vals, 0
 
     def inst_index(self, inst, kind):
         key = (id(inst), kind)
@@ -265,10 +257,20 @@ class _Writer:
             self.r.approx("%d note%s began on the same row as another one and %s left out" % (lost, "" if lost == 1 else "s", "was" if lost == 1 else "were"))
         return out
 
-    def cut_rows(self, placed, cells, total_rows):
+    def cut_rows(self, placed, cells, total_rows, tails=None):
+        """A cut (`---`) where a note ends and nothing follows; a note with a release tail gets the release (`===`) there and
+        its cut where the tail has died away (when that is before the next note)."""
         for i, (s, e, _) in enumerate(placed):
             nxt = placed[i + 1][0] if i + 1 < len(placed) else None
-            if nxt != e and e < total_rows and e not in cells:
+            if nxt == e or e >= total_rows or e in cells:
+                continue
+            tail = tails[i] if tails else 0
+            if tail:
+                cells[e] = ("===", "..", ".")
+                end = e + max(1, int(-(-tail // self.row_frames)))
+                if end < (nxt if nxt is not None else total_rows) and end not in cells:
+                    cells[end] = ("---", "..", ".")
+            else:
                 cells[e] = ("---", "..", ".")
 
     def melodic(self, v, g, total_rows):
@@ -293,10 +295,20 @@ class _Writer:
                 low4 = min(range(16), key=lambda k: (abs(noise_pitch(k, self.pal) - n.pitch), k))
                 text = "%X-#" % low4
             else:
-                text = note_text(max(1, min(96, n.pitch + 1)))
+                text = note_text(max(1, min(96, n.pitch - SQUARE_SHIFT if kind == "sq" else n.pitch + 1)))
+                if kind == "sq" and n.pitch < SQUARE_LOW:
+                    self.low += 1
             vol = "." if kind == "tri" else "%X" % max(0, min(15, n.vol))
             cells[s] = (text, "%02X" % self.inst_index(n.inst, kind), vol)
-        self.cut_rows(placed, cells, total_rows)
+        spt = 60.0 / (max(1, t.bpm) * PPQ)                    # seconds a tick lasts
+        tails = []
+        for s_, e_, n in placed:
+            if kind == "tri":
+                tails.append(0)
+                continue
+            gate = min(n.dur, (e_ - s_) * g) * spt
+            tails.append(release_frames(n.inst, self.volume_values(n.inst), gate))
+        self.cut_rows(placed, cells, total_rows, tails)
         return cells
 
     def dpcm(self, g, total_rows):
@@ -372,6 +384,9 @@ class _Writer:
 
         chans = [self.melodic(i, g, total_rows) for i in range(4)]
         dcells, keys, samples = self.dpcm(g, total_rows)
+        if self.low:
+            r.approx("%d pulse note%s below A1 (55 Hz), where the NES's 11-bit period runs out: FamiTracker plays %s wrongly"
+                     % (self.low, "" if self.low == 1 else "s", "it" if self.low == 1 else "them"))
         dpcm_inst = None
         if keys:
             dpcm_inst = len(self.insts)
@@ -399,7 +414,8 @@ class _Writer:
             patterns.append(uniq)
             order.append(orders)
         if self.cut_release:
-            r.approx("the release (r) of %s is not played: notes are cut where they end" % ", ".join("'%s'" % n for n in self.cut_release))
+            r.approx("the release (r) of %s is played after a note that is followed by a rest; a note that runs straight into the next one, or is "
+                     "let go while its level is still rising, is cut where it ends" % ", ".join("'%s'" % n for n in self.cut_release))
 
         title = _text(self.name or t.title or "", 32)
         author = _text(t.author, 32)
@@ -409,8 +425,8 @@ class _Writer:
                "# Global settings", "MACHINE         %d" % (1 if self.pal else 0), "FRAMERATE       0", "EXPANSION       0",
                "VIBRATO         1", "SPLIT           32", "", "# Macros"]
         for kind in (SEQ_VOLUME, SEQ_ARPEGGIO, SEQ_PITCH, SEQ_DUTY):
-            for idx, (vals, lp) in enumerate(self.macros[kind]):
-                out.append("MACRO%8d %4d %4d %4d %3d : %s" % (kind, idx, lp, -1, 0, " ".join(map(str, vals))))
+            for idx, (vals, lp, rel) in enumerate(self.macros[kind]):
+                out.append("MACRO%8d %4d %4d %4d %3d : %s" % (kind, idx, lp if rel < 0 else -1, rel - 1 if rel >= 0 else -1, 0, " ".join(map(str, vals))))
         out.append("")
         if samples:
             out.append("# DPCM samples")

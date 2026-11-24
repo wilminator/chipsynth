@@ -162,5 +162,56 @@ class VersionPolicyTests(unittest.TestCase):
         self.assertFalse(hasattr(ex, "reference_version"))
 
 
+class RealFamiStudioFacts(unittest.TestCase):
+    """What the real FamiStudio (built from source, run headless, see PLAN-FORMATS.md section 3) did with our files."""
+
+    def text(self, mml_text):
+        return ex.dump(Song.from_mml(mml_text).compile())[0]
+
+    def first_note(self, text, channel):
+        lines = text.splitlines()
+        i = next(k for k, l in enumerate(lines) if 'Channel Type="%s"' % channel in l)
+        return next(l for l in lines[i:] if l.strip().startswith("Note "))
+
+    def test_a_squares_c4_is_written_an_octave_below_chipsynths_name_for_it(self):
+        # FamiStudio's C1 is 32.7 Hz and its pulse value 1 is that C1; chipsynth's C4 is 261.6 Hz
+        sq = self.first_note(self.text("V1: o4 c\n"), "Square1")
+        self.assertIn('Value="C3"', sq)
+
+    def test_the_triangle_is_written_an_octave_up_from_the_square(self):
+        tr = self.first_note(self.text("[instr]\nb wave=tri\nV3: @b o4 c\n"), "Triangle")
+        self.assertIn('Value="C4"', tr)
+
+    def test_a_released_note_carries_a_release_frame_inside_a_longer_duration(self):
+        t = self.text("[instr]\nl wave=pulse a=0 d=4 s=8 r=6\nV1: @l l4 o4 c r2\n")
+        note = self.first_note(t, "Square1")
+        attrs = dict(a.split("=") for a in note.split()[1:])
+        dur, rel = int(attrs["Duration"].strip('"')), int(attrs["Release"].strip('"'))
+        self.assertTrue(0 < rel < dur)
+
+    def test_a_pattern_is_a_whole_number_of_groove_cycles(self):
+        # FamiStudio restarts the groove at each pattern: 16 rows of 5-5-6-5-6 ran 0.4% fast (78 ms in 19 s)
+        for bpm in (167, 117, 137):
+            t = self.text("tempo %d\nV1: l16 o4 c d e f g a b c c d e f g a b c c d e f g a b c\n" % bpm)
+            song = next(l for l in t.splitlines() if l.strip().startswith("Song "))
+            attrs = dict(a.split("=") for a in song.split()[1:] if "=" in a)
+            groove = attrs["Groove"].strip('"').split("-")
+            self.assertEqual(int(attrs["PatternLength"].strip('"')) % len(groove), 0, (bpm, groove))
+
+    def test_a_song_that_ends_inside_a_pattern_says_so(self):
+        t = self.text("tempo 120\nV1: l4 o4 c d e\n")
+        self.assertIn("PatternCustomSettings", t)
+        back = fam.load(t).songs[0]
+        notes_ = [(n.start, n.dur) for n in back.song.compile(dict(mml.builtin_library(), _mem=back.samples)).voices[0]]
+        self.assertEqual(len(notes_), 3)
+
+    def test_the_importer_cuts_a_note_at_its_release_frame(self):
+        t = self.text("[instr]\nl wave=pulse a=0 d=4 s=8 r=6\nV1: @l l4 o4 c r2\n")
+        back = fam.load(t).songs[0]
+        tune = back.song.compile(dict(mml.builtin_library(), _mem=back.samples))
+        self.assertEqual(len(tune.voices[0]), 1)
+        self.assertLessEqual(tune.voices[0][0].dur, 96 + 2)
+
+
 if __name__ == "__main__":
     unittest.main()
