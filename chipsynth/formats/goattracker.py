@@ -296,6 +296,13 @@ class Timing:
     fps: float              # player frames a second (the video rate times the multispeed)
     beat: int               # player frames in a quarter note
     clock: float            # the SID's clock, Hz
+    row: int = 0            # player frames in a typical pattern row (0 = not known): see `stall`
+
+    def stall(self):
+        """How many frames the player takes for one frame of table time.  Vibrato, portamento and the pulse table do not
+        run on the first frame of a row (the editor's and the packer's default optimisations, checked against the real
+        player), so a table that takes N frames of its own takes N * row / (row - 1) frames on the clock."""
+        return self.row / (self.row - 1.0) if self.row >= 2 else 1.0
 
     def sid_freq(self, note):
         """The SID frequency register for note index `note` (0 = C-0), as the player's table has it."""
@@ -503,7 +510,7 @@ def _pulse_program(tune, ptr, timing, start=None):
     a, b = _percent(lo_hi[0]), _percent(lo_hi[1])
     if a == b:
         return None, [], []
-    wanted = timing.fps / period / 0.5
+    wanted = timing.fps / (period * timing.stall()) / 0.5
     rate = max(1, min(15, round(wanted)))
     if abs(rate - wanted) > 0.1 * wanted:
         approx.append("the sweep speed is rounded to the nearest chipsynth rate (%d)" % rate)
@@ -544,7 +551,7 @@ def _vibrato(tune, entry, note, timing):
     depth = round(semis * 16)
     if depth < 1:
         return None, "speed table entry %d is too shallow to hear (under 1/32 of a semitone)" % entry
-    wanted = timing.fps / length / 0.8
+    wanted = timing.fps / (length * timing.stall()) / 0.8
     rate = max(1, min(15, round(wanted)))
     notes = ["vibrato is a triangle swing in the player and a sine in chipsynth; its rate and depth are rounded"]
     if depth > 15 or abs(rate - wanted) > 0.15 * wanted:
@@ -911,7 +918,10 @@ class _Plan:
         progs = [[0, own_wp]]
 
         def apply(c, d, off):
-            if c in (CMD_PORTAUP, CMD_PORTADOWN):
+            if c == 0:                      # a row with no command ends a portamento or vibrato command (the instrument's vibrato carries on)
+                ph["porta"] = None
+                ph["vib"], ph["who"] = (ins.ptr[STBL], "instrument '%s'" % label) if ins.vibdelay else (0, "")
+            elif c in (CMD_PORTAUP, CMD_PORTADOWN):
                 speed = self._speed(d, "pattern command '%s'" % COMMAND_NAMES[c])
                 ph["porta"] = (c, speed) if speed else None
             elif c == CMD_VIBRATO:
@@ -1032,12 +1042,12 @@ class _Plan:
                 atoms.append(Atom(n, p, over, 0, part))
             elif phase["porta"]:
                 direction, speed = phase["porta"]
-                signed = speed if direction == CMD_PORTAUP else -speed
+                signed = (speed if direction == CMD_PORTAUP else -speed) / self.timing.stall()      # no slide on a row's first frame
                 f0 = fcur if fcur is not None else float(self.timing.sid_freq(note))
                 new, fcur = self._glide(note, f0, signed, n, not atoms and fcur is None, over, part)
                 atoms.extend(new)
                 rep.approx("portamento is played as a glide to the nearest semitone (the player slides the frequency in even steps, chipsynth glides "
-                           "in pitch) and is taken to last until the next note or command (not checked against the player)")
+                           "in pitch); it lasts as long as the rows that carry the command, as in the player")
             else:
                 if fcur is not None:                # a slide that was stopped leaves the pitch where it got to
                     p = max(0, min(107, self._pitch_of(fcur, note)))
@@ -1092,17 +1102,26 @@ def _voice_events(rows, resolve, end, loop_frame, tpf, report, ch=0, plan=None, 
     notes = []                        # (frame, pitch or None for key off, instrument, command, data, commands on the rows after it)
     inst_cur = 0
     sounding = None                   # the commands on the rows after the note that is sounding
+    active = None                     # the portamento or vibrato command (command, data) in force on the sounding note: it lasts one row
     for frame, note, inst, cmd, data, trans in rows:
         if inst:
             inst_cur = inst
         if FIRSTNOTE <= note <= LASTNOTE:
             sounding = []
+            active = (cmd, data) if cmd in (CMD_PORTAUP, CMD_PORTADOWN, CMD_VIBRATO) else None
             notes.append((frame, note - FIRSTNOTE + trans, inst_cur, cmd, data, sounding))
             continue
         if note == KEYOFF:
             notes.append((frame, None, inst_cur, 0, 0, None))
         if plan is not None and cmd in MID_COMMANDS and sounding is not None and note != KEYOFF:
+            if cmd in (CMD_PORTAUP, CMD_PORTADOWN, CMD_VIBRATO):
+                if (cmd, data) == active:               # the same command on the next row: the effect simply goes on
+                    continue
+                active = (cmd, data)
             sounding.append((frame, cmd, data))
+        elif plan is not None and cmd == 0 and active and sounding is not None and note != KEYOFF:
+            sounding.append((frame, 0, 0))              # a row with no command ends it
+            active = None
         elif cmd == CMD_VIBRATO:
             report.drop("pattern command 'vibrato' on a row without a new note (it changes a note's vibrato part-way)")
         elif plan is not None and cmd in MID_COMMANDS:
@@ -1261,6 +1280,16 @@ class _Instruments:
         return name
 
 
+def _typical_row(tune, multispeed):
+    """Frames in the row length the song uses most (its commonest tempo command, else the player's default)."""
+    seen = {}
+    for rows in tune.patterns:
+        for row in rows:
+            if row[2] == CMD_SETTEMPO and (row[3] & 0x7F) >= 3:
+                seen[row[3] & 0x7F] = seen.get(row[3] & 0x7F, 0) + 1
+    return max(seen, key=lambda k: (seen[k], k)) if seen else 6 * multispeed
+
+
 def load(data, region="pal", multispeed=1, subtune=None):
     """`.sng` bytes -> Result.  `region` is 'pal' (50 Hz) or 'ntsc' (60 Hz): the file does not say.
     `multispeed` is 1, 2 or 4.  `subtune` picks one subtune (1-based); the default is all."""
@@ -1273,7 +1302,7 @@ def load(data, region="pal", multispeed=1, subtune=None):
     report.note("%s timing (%g Hz), %s, multispeed x%d" % ("PAL" if pal else "NTSC", hz, tune.version, multispeed))
     report.note("the file does not record PAL or NTSC, nor multispeed: these come from the options")
     tpf = 4 // multispeed
-    timing = Timing(hz * multispeed, 24 * multispeed, SID_CLOCK["pal" if pal else "ntsc"])
+    timing = Timing(hz * multispeed, 24 * multispeed, SID_CLOCK["pal" if pal else "ntsc"], _typical_row(tune, multispeed))
     bases, defer = {}, {}
     for i, ins in enumerate(tune.instruments, 1):
         label, inst = _instrument(tune, i, ins, report, timing, defer)
