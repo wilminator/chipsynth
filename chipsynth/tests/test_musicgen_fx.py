@@ -474,8 +474,9 @@ class ExportTests(unittest.TestCase):
         tune = Song.from_mml(musicgen.generate("boss", 5, fx="all")).compile()
         out, rep = fex.dump(tune)
         left = " | ".join(rep.dropped)
-        for what in ("echo and reverb", "slide into a note", "vibrato", "filter", "filter sweep", "pulse-width sweep"):
+        for what in ("echo and reverb", "slide into a note", "vibrato", "filter", "filter sweep"):
             self.assertIn(what, left)
+        self.assertIn("pulse-width sweep", " | ".join(rep.approximated))          # a pulse's sweep is written as a duty envelope
         fam.load(out)                                                                           # and what is written reads back
 
     def test_equal_instruments_are_written_once(self):

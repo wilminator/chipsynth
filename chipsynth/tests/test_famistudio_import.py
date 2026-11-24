@@ -74,10 +74,11 @@ class SongTests(unittest.TestCase):
         self.assertTrue(notes(self.tune, 2))
         self.assertTrue(notes(self.tune, 3))
 
-    def test_c4_is_chipsynths_c4_and_times_are_rows(self):
+    def test_a_square_c4_is_an_octave_above_chipsynths_c4_and_times_are_rows(self):
+        # FamiStudio's A3 is 440 Hz on a pulse channel (played in FamiStudio 4.5: C4 is 523 Hz), so its C4 is chipsynth's C5
         n = notes(self.tune, 0)
-        self.assertEqual(n[0], (0, 48, 48))                  # C4 for two rows of 24 ticks
-        self.assertEqual(n[1][2], 52)                         # E4
+        self.assertEqual(n[0], (0, 48, 60))                  # C4 for two rows of 24 ticks
+        self.assertEqual(n[1][2], 64)                         # E4
         self.assertEqual(n[1][0], 48)
 
     def test_tempo_is_what_the_rows_last_on_the_nes(self):
@@ -124,7 +125,7 @@ class SongTests(unittest.TestCase):
         pkg.add_song("tiny", self.imp.song, lib)
         again = pk.loads(pk.dumps(pkg))
         t = again.tune("tiny")
-        self.assertEqual(notes(t, 0)[0], (0, 48, 48))
+        self.assertEqual(notes(t, 0)[0], (0, 48, 60))
         self.assertIn("Kick_Drum", again.samples)
 
 
