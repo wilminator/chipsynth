@@ -293,7 +293,7 @@ class InstrumentTests(unittest.TestCase):
         self.assertEqual((i.pws_from, i.pws_to, i.pws_rate), (60, 50, 3))
 
     def test_vibrato_becomes_a_speed_table_entry_and_reads_back(self):
-        for rate, depth in ((6, 5), (8, 4), (4, 3), (3, 6), (2, 10), (1, 1)):
+        for rate, depth in ((5, 5), (7, 4), (4, 3), (3, 5), (2, 11), (1, 1)):     # the player's vibrato does not run on a row's first frame, so some rates need other cycles
             _, _, _, rep, res = trip("[instr]\nv wave=saw vib=%d,%d\nV1: @v c\n" % (rate, depth))
             i = list(res.songs[0].song.instruments.values())[0]
             self.assertEqual((i.vib_rate, i.vib_depth), (rate, depth))
@@ -333,6 +333,30 @@ class InstrumentTests(unittest.TestCase):
         text = "[instr]\nlead_one wave=pulse\nlead_two wave=pulse a=2\nV1: @lead_one c @lead_two c\n"
         t = gt.parse(ex.dump(tune_of(text))[0])
         self.assertEqual([i.name for i in t.instruments], ["lead_one", "lead_two"])
+
+
+class RealPlayerFactsTests(unittest.TestCase):
+    """What checking the files against GoatTracker's own player (tests/test_goattracker_oracle.py) found, pinned here so
+    that it holds on machines that do not have the player."""
+
+    def test_every_wavetable_starts_with_a_row_that_writes_the_note_frequency(self):
+        # 0x80 as the first row means "keep the frequency" and the voice stayed silent: the first row must be 0x00
+        for text in (BASE, "[instr]\na wave=pulse arp=0,4,7 arprate=8\nV1: @a c d\n"):
+            t = gt.parse(trip(text)[2])
+            for ins in t.instruments:
+                self.assertEqual(t.tables[0][1][ins.ptr[0] - 1], 0x00, ins.name)
+
+    def test_the_gate_timer_is_two_frames_unless_a_row_is_shorter_than_six_frames(self):
+        slow = gt.parse(trip(BASE)[2])
+        self.assertEqual({i.gatetimer & 0x3F for i in slow.instruments}, {2})
+        fast = gt.parse(trip(BASE.replace("tempo 125", "tempo 250"))[2])
+        self.assertEqual({i.gatetimer & 0x3F for i in fast.instruments}, {1})
+
+    def test_a_vibrato_and_a_pulse_sweep_allow_for_the_frame_the_player_skips_each_row(self):
+        # the packer's default optimisations skip one call a row, so table time runs L / (L - 1) slower
+        _, _, _, _, res = trip("tempo 125\n[instr]\nv wave=saw vib=5,5\nV1: @v c\n")
+        i = list(res.songs[0].song.instruments.values())[0]
+        self.assertEqual((i.vib_rate, i.vib_depth), (5, 5))
 
 
 class ReportTests(unittest.TestCase):
